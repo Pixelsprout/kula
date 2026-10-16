@@ -1,5 +1,5 @@
-# Builds each Theme's <theme>_face.glb and ball.glb for Kula. Run from any directory:
-#   /Applications/Blender.app/Contents/MacOS/Blender --background --python games/kula/assets/source/make_meshes.py
+# Builds each Theme's <theme>_face.glb and ball.glb for Kula. Run from the repository root:
+#   /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_meshes.py
 #
 # Blender is +Z up. The glTF export turns that into +Y up, so a quad facing
 # Blender +Z faces glTF +Y, like the engine's primitive plane.

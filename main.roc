@@ -1,4 +1,4 @@
-app [init, step, loaded, view] { pf: platform "../../platform/main.roc", roc: "nightly-2026-10-11-7d256b9", linalg: "../../packages/linalg/main.roc", mesh: "../../packages/mesh/main.roc", ui: "../../packages/ui/main.roc" }
+app [init, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/linalg-Ev8aCQRBUiaxGBiVsbF4uP4ZQLK6MyPK9XBNd3DNJxzf.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/mesh-38WZYfAsrYQdwFagvpZ6vs4u7umYDMgMonPiX6HjWcBF.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/platform-JA7jQ7etuP66H6FYkfwVGnormsSscVFze9iGhdyRvTm5.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/ui-ArByGbhRkRDmjcfpXfWgc9Upm8ANAs1XavZjMvToDQqV.tar.zst" }
 
 import linalg.Quat
 import linalg.Vec3

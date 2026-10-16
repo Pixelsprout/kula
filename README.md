@@ -10,14 +10,57 @@ copies.
 
 ## Run
 
-From this directory:
+Kula needs only Roc. Install the Roc nightly `nightly-2026-10-11-7d256b9`.
+The v0.1.0 release built the bundles with it. Then, from this directory:
 
 ```sh
-roc run main.roc
+roc main.roc
 roc test main.roc
 ```
 
+Roc downloads the platform and the packages from the bundle URLs in the
+`main.roc` header. They come from the
+[rocco v0.1.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.1.0):
+
+| Bundle | URL |
+|---|---|
+| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/platform-JA7jQ7etuP66H6FYkfwVGnormsSscVFze9iGhdyRvTm5.tar.zst |
+| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/linalg-Ev8aCQRBUiaxGBiVsbF4uP4ZQLK6MyPK9XBNd3DNJxzf.tar.zst |
+| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/mesh-38WZYfAsrYQdwFagvpZ6vs4u7umYDMgMonPiX6HjWcBF.tar.zst |
+| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/ui-ArByGbhRkRDmjcfpXfWgc9Upm8ANAs1XavZjMvToDQqV.tar.zst |
+
+To move to a new rocco release, copy the URLs and the nightly from its
+release notes into the header and this table.
+
 Kula loads its meshes in packs. See Levels and Themes.
+
+### Against a local rocco-engine
+
+To run Kula on engine changes that are not released, use a rocco-engine
+checkout. Build its sokol libraries once, as its `README.md` says. Then:
+
+```sh
+scripts/local.sh on
+roc main.roc
+scripts/local.sh off
+```
+
+`scripts/local.sh on` saves the header to `.header.url` and points `pf`,
+`linalg`, `mesh` and `ui` at `../rocco-engine`. Set `ROCCO_DIR` to use a
+different checkout. `scripts/local.sh on` then builds the debug host and
+inputs there.
+`scripts/local.sh off` puts the saved header back.
+
+A header with a local path must not be committed. `scripts/local.sh on`
+enables `.githooks/pre-commit`, which stops such a commit. To enable the
+hook in a new clone, run `git config core.hooksPath .githooks`. CI runs the
+same check with `scripts/check-header.sh`.
+
+### CI
+
+`.github/workflows/ci.yml` runs on macOS arm64, Ubuntu and Windows with only
+Roc installed. It checks the header, then runs `roc fmt --check`, `roc check`,
+`roc test` and 30 frames of `roc main.roc` against the bundle URLs.
 
 ## Controls
 

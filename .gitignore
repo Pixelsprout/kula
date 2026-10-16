@@ -1,0 +1,9 @@
+# scripts/local.sh on saves the bundle header here.
+.header.url
+# Roc's linker output.
+*.bin
+*.exe
+*.pdb
+*.lib
+.DS_Store
+__pycache__/

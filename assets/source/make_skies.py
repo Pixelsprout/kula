@@ -1,5 +1,5 @@
-# Renders each Theme's sky for Kula: six PNGs in assets/sky/<theme>/. Run from any directory:
-#   /Applications/Blender.app/Contents/MacOS/Blender --background --python games/kula/assets/source/make_skies.py
+# Renders each Theme's sky for Kula: six PNGs in assets/sky/<theme>/. Run from the repository root:
+#   /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_skies.py
 #
 # A Blender sky texture lights an empty world. One 90 degree camera renders
 # each cube face. The face layout is the one engine/sky.odin states: face px

@@ -63,7 +63,7 @@ PAL frames. The bob amount `s` is `rsin(phase) * 200 / 4096`, from -200 to 200.
 | Landing squish | Adds to `s`. While it runs, the phase stops and the bob holds its value | Code | Task `42fsutrf` |
 
 The ball's `rot` is its spin. The clone sets the Draw's `scale_rot` so the
-scale acts along up whatever the spin (`docs/adr/0002-a-scale-acts-along-its-own-axes.md`).
+scale acts along up whatever the spin (rocco-engine `docs/adr/0002-a-scale-acts-along-its-own-axes.md`).
 
 ## Moves
 

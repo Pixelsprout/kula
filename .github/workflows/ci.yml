@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Runners with only Roc installed, so the platform and the packages come
+  # from the bundle URLs in the main.roc header.
+  kula:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            roc: roc_nightly-macos_apple_silicon
+          - os: ubuntu-24.04
+            roc: roc_nightly-linux_x86_64
+          - os: windows-2022
+            roc: roc_nightly-windows_x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check that the header names no local path
+        run: sh scripts/check-header.sh
+
+      # The main.roc header holds the one copy of the Roc pin.
+      - name: Read the Roc pin
+        run: echo "ROC_NIGHTLY=$(sed -n '1s/.*roc: "nightly-\([^"]*\)".*/\1/p' main.roc)" >> "$GITHUB_ENV"
+
+      - name: Install Roc
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p "$RUNNER_TEMP/roc"
+          curl -fsSL "https://github.com/roc-lang/nightlies/releases/download/nightly-${ROC_NIGHTLY}/${{ matrix.roc }}-${ROC_NIGHTLY}.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP/roc" --strip-components=1
+          echo "$RUNNER_TEMP/roc" >> "$GITHUB_PATH"
+
+      # The Roc zip holds one folder named after the nightly.
+      - name: Install Roc
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $roc = "$env:RUNNER_TEMP\roc"
+          Invoke-WebRequest "https://github.com/roc-lang/nightlies/releases/download/nightly-$env:ROC_NIGHTLY/${{ matrix.roc }}-$env:ROC_NIGHTLY.zip" -OutFile "$env:RUNNER_TEMP\roc.zip"
+          Expand-Archive "$env:RUNNER_TEMP\roc.zip" -DestinationPath $roc
+          "$roc\${{ matrix.roc }}-$env:ROC_NIGHTLY" >> $env:GITHUB_PATH
+
+      - name: Check the format
+        run: roc fmt --check *.roc
+
+      - name: Check
+        run: roc check main.roc
+
+      - name: Test
+        run: roc test main.roc
+
+      # The game needs an X server and a GL driver to run, not to link.
+      - name: Install the X server and Mesa
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libgl1 libgl1-mesa-dri libx11-6 libxi6 libxcursor1
+
+      # On Windows the link must not find a Visual Studio library through LIB.
+      - name: Run Kula from the bundle URLs
+        run: |
+          unset LIB
+          run=""
+          if [ "$RUNNER_OS" = Linux ]; then run="timeout 600 xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1"; fi
+          set +e
+          ROCCO_EXIT_AFTER_FRAMES=30 $run roc main.roc > out.txt 2> err.txt
+          code=$?
+          set -e
+          tail -40 err.txt
+          cat out.txt
+          if [ "$code" -ne 0 ] || [ "$(grep -c '^Frame Count: ' out.txt)" -ne 1 ] || ! grep -qx 'Frame Count: 30' out.txt; then
+            echo "FAIL: kula exit=$code, expected one 'Frame Count: 30' line" >&2
+            exit 1
+          fi
