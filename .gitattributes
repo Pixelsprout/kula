@@ -1,0 +1,4 @@
+# An editor on Windows can save CRLF. Keep Roc sources LF in the repo.
+*.roc text eol=lf
+# main.roc embeds the levels, and Level.roc splits rows on LF.
+levels/*.txt text eol=lf
