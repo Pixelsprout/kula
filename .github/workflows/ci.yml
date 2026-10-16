@@ -39,7 +39,8 @@ jobs:
 
       # The main.roc header holds the one copy of the Roc pin.
       - name: Read the Roc pin
-        run: echo "ROC_NIGHTLY=$(sed -n '1s/.*roc: "nightly-\([^"]*\)".*/\1/p' main.roc)" >> "$GITHUB_ENV"
+        run: |
+          echo "ROC_NIGHTLY=$(sed -n '1s/.*roc: "nightly-\([^"]*\)".*/\1/p' main.roc)" >> "$GITHUB_ENV"
 
       - name: Install Roc
         if: runner.os != 'Windows'
