@@ -1,9 +1,10 @@
-app [init, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/linalg-Ev8aCQRBUiaxGBiVsbF4uP4ZQLK6MyPK9XBNd3DNJxzf.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/mesh-38WZYfAsrYQdwFagvpZ6vs4u7umYDMgMonPiX6HjWcBF.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/platform-JA7jQ7etuP66H6FYkfwVGnormsSscVFze9iGhdyRvTm5.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.1.0/ui-ArByGbhRkRDmjcfpXfWgc9Upm8ANAs1XavZjMvToDQqV.tar.zst" }
+app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/platform-F9zvcUJ1WKQqPXHWyyUiKWfiXtAG9Y3fiCfC1DeaQBUB.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/ui-A9KQX4wyuzV5ZtJQz5RWwAKDRy42e6mMCirmkBucgLcz.tar.zst" }
 
 import linalg.Quat
 import linalg.Vec3
 import pf.Vocabulary exposing [Command, Config, Draw, Input, Manifest, Rgb, Scene]
 import pf.Key
+import pf.Launch
 import pf.Light
 import pf.QueryResults
 import World
@@ -15,6 +16,9 @@ import Theme
 import Hud
 
 Model : Rules.Model
+
+launch : Config -> Vocabulary.Launch
+launch = |_config| Launch.default
 
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
@@ -170,15 +174,15 @@ cube = |meshes, id, cell, size, tint| { id, mesh: meshes.cube, pos: Grid.to_vec3
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, assets: ["ball", "haze_face", "sky/haze"] }).model
+	booted = init({ seed: 0, args: [], assets: ["ball", "haze_face", "sky/haze"] }).model
 	loaded(loaded(booted, "kula", [{ name: "ball", id: 4 }]), "haze", [{ name: "haze_face", id: 5 }, { name: "sky/haze", id: 1 }])
 }
 
 idle : Input
 idle = { held: [], pressed: [], mouse: { dx: 0.0, dy: 0.0 } }
 
-expect init({ seed: 0, assets: [] }).commands == [Load({ pack: "kula", assets: ["ball"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
-expect init({ seed: 0, assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, sky: 0 }
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, sky: 0 }
 expect started.meshes == { cube: 1, face: 5, ball: 4, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
