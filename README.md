@@ -11,7 +11,7 @@ copies.
 ## Run
 
 Kula needs only Roc. Install the Roc nightly `nightly-2026-10-11-7d256b9`.
-The v0.2.0 release built the bundles with it. Then, from this directory:
+The v0.3.0 release built the bundles with it. Then, from this directory:
 
 ```sh
 roc main.roc
@@ -20,14 +20,14 @@ roc test main.roc
 
 Roc downloads the platform and the packages from the bundle URLs in the
 `main.roc` header. They come from the
-[rocco v0.2.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.2.0):
+[rocco v0.3.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.3.0):
 
 | Bundle | URL |
 |---|---|
-| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/platform-F9zvcUJ1WKQqPXHWyyUiKWfiXtAG9Y3fiCfC1DeaQBUB.tar.zst |
-| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst |
-| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst |
-| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/ui-A9KQX4wyuzV5ZtJQz5RWwAKDRy42e6mMCirmkBucgLcz.tar.zst |
+| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/platform-CVfyXJcNgi6CL3vEUUGgQBh4j1swttiRsjt9wZNFKBj7.tar.zst |
+| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst |
+| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst |
+| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/ui-A9KQX4wyuzV5ZtJQz5RWwAKDRy42e6mMCirmkBucgLcz.tar.zst |
 
 To move to a new rocco release, copy the URLs and the nightly from its
 release notes into the header and this table.
@@ -197,7 +197,8 @@ carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
-   The `kula` pack holds `ball`, which every level uses. It never unloads.
+   The `kula` pack holds `ball` and `sound/bounce`, which every level uses.
+   It never unloads.
 2. When the ball clears a level before the last, Kula sends Load for the
    next level's Theme.
 3. When the host calls `loaded` for that pack, Kula takes its mesh ids and
@@ -278,3 +279,26 @@ Blender from this directory:
 ```
 
 Commit the scripts and their outputs. The build does not run Blender.
+
+## Sound
+
+The ball bounces with a short thud when it lands from a forward jump or
+from a fall onto a block. A jump in place, a roll and a fall off the level
+make no sound. As in the original, the ball is silent when the player has
+no control, so a landing in `Cleared` or `Won` makes no sound. Kula has no
+transporters yet; a landing after one must stay silent too.
+
+`step` returns `Sound.play` with the bounce's Sound id in the step the ball
+lands. `Ball.landed` decides the landing.
+
+| File | What it is |
+|---|---|
+| `assets/sound/bounce.wav` | The bounce, 0.2 s of 16-bit mono at 48 kHz |
+
+`assets/source/make_sounds.py` synthesizes it with the Python standard
+library. It does not copy the original's sound. Run it from this directory
+and commit its output:
+
+```sh
+python3 assets/source/make_sounds.py
+```

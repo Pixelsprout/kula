@@ -8,23 +8,24 @@ Rules := [].{
 
 	# collected holds the cells of the keys taken so far. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, phase : Phase, keys_left : U64, collected : Set(World.Cell), unloads : List(Str) }
+	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, collected : Set(World.Cell), unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| {
 		level = parse_or_crash(Level.text(level_number))
 		keys = level.items.keep_if(|entry| entry.item == Key).len()
-		{ level_number, level, ball: Ball.start(level.start), meshes, phase: Playing, keys_left: keys, collected: Set.empty(), unloads: [] }
+		{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, collected: Set.empty(), unloads: [] }
 	}
 
 	restart : Model -> Model
-	restart = |model| start(model.meshes, model.level_number)
+	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start(model.meshes, model.level_number + 1), phase: Starting(start_pause) }
+	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {

@@ -7,7 +7,7 @@ import Grid
 import Ball
 
 View := [].{
-	# The kula pack's assets. Each Theme names its own.
+	# The kula pack's meshes. Each Theme names its own assets.
 	assets : List(Str)
 	assets = ["ball"]
 
