@@ -7,6 +7,7 @@ import pf.Key
 import pf.Launch
 import pf.Light
 import pf.QueryResults
+import pf.Sound
 import World
 import Grid
 import Ball
@@ -23,12 +24,16 @@ launch = |_config| Launch.default
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.append(bounce_sound) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
 kula_pack : Str
 kula_pack = "kula"
+
+# assets/source/make_sounds.py writes it.
+bounce_sound : Str
+bounce_sound = "sound/bounce"
 
 load_theme : U64 -> Command
 load_theme = |level_number| {
@@ -42,7 +47,7 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest) }
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound) }
 	} else if model.phase == Cleared and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
@@ -68,8 +73,17 @@ step = |model, input, _results, dt| {
 		[]
 	}
 	unloads = model.unloads.map(|pack| Unload(pack))
-	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads) }
+	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)) }
 }
+
+# As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
+bounce : Model, Model -> List(Command)
+bounce = |before, after|
+	if before.phase == Playing and Ball.landed(before.ball, after.ball) {
+		[Sound.play(after.bounce)]
+	} else {
+		[]
+	}
 
 # Input is read before the ball moves. Ball.act ignores a key that cannot act on the current move.
 read_input : Input -> (Model -> Model)
@@ -174,15 +188,19 @@ cube = |meshes, id, cell, size, tint| { id, mesh: meshes.cube, pos: Grid.to_vec3
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "haze_face", "sky/haze"] }).model
-	loaded(loaded(booted, "kula", [{ name: "ball", id: 4 }]), "haze", [{ name: "haze_face", id: 5 }, { name: "sky/haze", id: 1 }])
+	booted = init({ seed: 0, args: [], assets: ["ball", "haze_face", "sky/haze", "sound/bounce"] }).model
+	loaded(loaded(booted, "kula", [{ name: "ball", id: 4 }, { name: "sound/bounce", id: bounce_id }]), "haze", [{ name: "haze_face", id: 5 }, { name: "sky/haze", id: 1 }])
 }
+
+bounce_id : U32
+bounce_id = 65537
 
 idle : Input
 idle = { held: [], pressed: [], mouse: { dx: 0.0, dy: 0.0 } }
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "sound/bounce"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, sky: 0 }
+expect init({ seed: 0, args: [], assets: [] }).model.bounce == 0 and started.bounce == bounce_id
 expect started.meshes == { cube: 1, face: 5, ball: 4, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
@@ -321,6 +339,39 @@ expect {
 	landed.ball.motion == Still and landed.ball.pose.cell == { x: 0, y: 1, z: 4 }
 }
 
+# The bounce plays in the step a forward jump lands, and in no step before it.
+expect {
+	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
+	jumping = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1)
+	in_air = step(jumping.model, idle, QueryResults.empty, 0.3)
+	landing = step(in_air.model, idle, QueryResults.empty, 0.3)
+	jumping.commands == [] and in_air.commands == [] and landing.model.ball.motion == Still and landing.commands == [Sound.play(bounce_id)]
+}
+
+# A fall onto a lower block plays the bounce too.
+expect {
+	on_layer1 = at_pose(started, { ..started.level.start, cell: { x: 0, y: 2, z: 6 } })
+	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
+	jumped = step(rolling, space, QueryResults.empty, 0.01).model
+	step(jumped, idle, QueryResults.empty, 1.0).commands == [Sound.play(bounce_id)]
+}
+
+# A jump in place does not bounce, and a fall off the level restarts it with no bounce.
+expect {
+	jumping_in_place = step(started, space, QueryResults.empty, 0.27).model
+	facing_out = at_pose(started, { ..started.level.start, forward: { x: -1, y: 0, z: 0 } })
+	falling = step(facing_out, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.25).model
+	restarted = step(falling, idle, QueryResults.empty, 2.0)
+	step(jumping_in_place, idle, QueryResults.empty, 0.3).commands == [] and restarted.model.ball == started.ball and restarted.commands == []
+}
+
+# With no control, in Cleared or Won, a landing is silent, as in the original.
+expect {
+	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
+	jumping = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1).model
+	[Cleared, Won].all(|phase| step({ ..jumping, phase }, idle, QueryResults.empty, 0.6).commands == [])
+}
+
 # Held Up rolls on through the cell with no step at rest.
 expect {
 	model = [0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
@@ -346,10 +397,11 @@ expect {
 	finished.commands == [Load({ pack: "inca", assets: ["inca_face", "sky/inca"] })]
 		and finished.model.phase == Cleared
 			and switched.meshes == { cube: 1, face: 7, ball: 4, sky: 2 }
-				and switched.level_number == 2
-					and switched.phase == Starting(Rules.start_pause)
-						and after.commands == [Unload("haze")]
-							and step(after.model, idle, QueryResults.empty, 0.1).commands == []
+				and switched.bounce == bounce_id
+					and switched.level_number == 2
+						and switched.phase == Starting(Rules.start_pause)
+							and after.commands == [Unload("haze")]
+								and step(after.model, idle, QueryResults.empty, 0.1).commands == []
 }
 
 # A Cleared level sends its Load once.

@@ -111,6 +111,11 @@ Ball := [].{
 	can_land : F32, F32 -> Bool
 	can_land = |t, lift| t >= 16.0 / 27.0 and lift <= 0.0
 
+	# True when the ball ends a forward jump or a fall onto a block between before and after.
+	# The original's CheckIfPlayerLanded runs for these two only, not for a jump in place.
+	landed : Ball.Ball, Ball.Ball -> Bool
+	landed = |before, after| can_touch_down(before.motion) and !can_touch_down(after.motion)
+
 	# A roll or a jump starts only from Still with no turn running. A floor roll,
 	# or an edge roll before the edge, can also start a jump. A turn can start
 	# during a jump in place.
@@ -220,6 +225,14 @@ start_jump_in_place = |blocks, ball|
 	} else {
 		{ ..ball, motion: JumpingInPlace({ t: 0.0 }) }
 	}
+
+# A fall off the level never touches down. The level restarts instead.
+can_touch_down : Ball.Motion -> Bool
+can_touch_down = |motion| match motion {
+	Jumping(_) => True
+	Falling({ drop: Onto(_), .. }) => True
+	_ => False
+}
 
 can_turn : Ball.Motion -> Bool
 can_turn = |motion| match motion {
@@ -805,4 +818,24 @@ expect {
 	rolling = Ball.act(blocks([cell(0, 0, 0)]), still, Roll)
 	on_wrap = Ball.advance(rolling, 0.14)
 	Ball.advance(rolling, 0.02).bob > 0.0 and Ball.advance(on_wrap, 0.02).bob == on_wrap.bob
+}
+
+# A forward jump lands in the step it ends, also when Up held starts the next roll in that step.
+expect {
+	jumping = Ball.act(long_floor, still, forward_jump)
+	!Ball.landed(jumping, Ball.advance(jumping, 0.53)) and Ball.landed(jumping, Ball.advance(jumping, 0.54)) and Ball.landed(jumping, Ball.advance_up_held(long_floor, jumping, 0.6))
+}
+
+# A fall onto a block lands. A fall off the level does not, though the restart leaves the ball Still.
+expect {
+	onto = Ball.act(blocks([cell(0, 0, 0), cell(0, -1, -2)]), still, forward_jump)
+	off = Ball.advance(Ball.act(blocks([cell(0, 0, 0)]), still, forward_jump), 5.0)
+	!Ball.landed(onto, Ball.advance(onto, 0.70)) and Ball.landed(onto, Ball.advance(onto, 0.71)) and !Ball.landed(off, still)
+}
+
+# As in the original, a jump in place and a roll do not land.
+expect {
+	jumping_in_place = Ball.act(floor_ahead, still, in_place)
+	rolling = Ball.act(floor_ahead, still, Roll)
+	!Ball.landed(jumping_in_place, Ball.advance(jumping_in_place, 0.54)) and !Ball.landed(rolling, Ball.advance(rolling, 0.26)) and !Ball.landed(still, still)
 }

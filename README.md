@@ -197,7 +197,8 @@ carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
-   The `kula` pack holds `ball`, which every level uses. It never unloads.
+   The `kula` pack holds `ball` and `sound/bounce`, which every level uses.
+   It never unloads.
 2. When the ball clears a level before the last, Kula sends Load for the
    next level's Theme.
 3. When the host calls `loaded` for that pack, Kula takes its mesh ids and
@@ -278,3 +279,26 @@ Blender from this directory:
 ```
 
 Commit the scripts and their outputs. The build does not run Blender.
+
+## Sound
+
+The ball bounces with a short thud when it lands from a forward jump or
+from a fall onto a block. A jump in place, a roll and a fall off the level
+make no sound. As in the original, the ball is silent when the player has
+no control, so a landing in `Cleared` or `Won` makes no sound. Kula has no
+transporters yet; a landing after one must stay silent too.
+
+`step` returns `Sound.play` with the bounce's Sound id in the step the ball
+lands. `Ball.landed` decides the landing.
+
+| File | What it is |
+|---|---|
+| `assets/sound/bounce.wav` | The bounce, 0.2 s of 16-bit mono at 48 kHz |
+
+`assets/source/make_sounds.py` synthesizes it with the Python standard
+library. It does not copy the original's sound. Run it from this directory
+and commit its output:
+
+```sh
+python3 assets/source/make_sounds.py
+```
