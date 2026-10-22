@@ -1,4 +1,4 @@
-app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/platform-F9zvcUJ1WKQqPXHWyyUiKWfiXtAG9Y3fiCfC1DeaQBUB.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.2.0/ui-A9KQX4wyuzV5ZtJQz5RWwAKDRy42e6mMCirmkBucgLcz.tar.zst" }
+app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/platform-CVfyXJcNgi6CL3vEUUGgQBh4j1swttiRsjt9wZNFKBj7.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.3.0/ui-A9KQX4wyuzV5ZtJQz5RWwAKDRy42e6mMCirmkBucgLcz.tar.zst" }
 
 import linalg.Quat
 import linalg.Vec3
@@ -138,7 +138,7 @@ view = |model| {
 		playing_ball_tint
 	}
 	ball = View.ball_draw(model.ball, model.meshes.ball, ball_tint)
-	{ camera, draws: blocks.concat(keys).append(ball), colliders: [], lights: theme.lights, cursor: Free, sky: model.meshes.sky, ui: Hud.ui(model), queries: [] }
+	{ camera, draws: blocks.concat(keys).append(ball), colliders: [], lights: theme.lights, cursor: Free, sky: model.meshes.sky, ui: Hud.ui(model), queries: [], loops: [] }
 }
 
 # Face draw ids count up from 1, so the key ids start well past any level's faces.
