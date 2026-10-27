@@ -205,7 +205,6 @@ won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 cube : World.Meshes, U64, World.Cell, F32, Rgb -> Vocabulary.Draw
 cube = |meshes, id, cell, size, tint| { ..Draw.default, id, mesh: meshes.cube, pos: Grid.to_vec3(cell), scale: Vec3.scale(Vec3.one, size), tint }
 
-# A Manifest of meshes, skies and Sounds with no durations or Clips.
 manifest : List((Str, U32)) -> Manifest
 manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: [] })
 

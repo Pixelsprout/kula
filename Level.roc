@@ -73,18 +73,17 @@ Level := [].{
 			}
 		}
 		for numbered in $entries {
-			match numbered.entry {
-				Item({ block, face, item }) => {
-					if !$blocks.contains(block) {
-						return Err(NoBlock(numbered.line))
-					}
-					$items = $items.append({ cell: Grid.add(block, face), up: face, item })
+			{ block, face, kind } = numbered.entry
+			if !$blocks.contains(block) {
+				return Err(NoBlock(numbered.line))
+			}
+			cell_on_face = Grid.add(block, face)
+			match kind {
+				Item(item) => {
+					$items = $items.append({ cell: cell_on_face, up: face, item })
 				}
-				Start({ block, face, forward }) => {
-					if !$blocks.contains(block) {
-						return Err(NoBlock(numbered.line))
-					}
-					$starts = $starts.append({ cell: Grid.add(block, face), up: face, forward })
+				StartFacing(forward) => {
+					$starts = $starts.append({ cell: cell_on_face, up: face, forward })
 				}
 			}
 		}
@@ -112,41 +111,38 @@ tile = |byte| match byte {
 	_ => Err(Unknown)
 }
 
-Entry : [
-	Item({ block : World.Cell, face : World.Cell, item : World.Item }),
-	Start({ block : World.Cell, face : World.Cell, forward : World.Cell }),
-]
+Entry : { block : World.Cell, face : World.Cell, kind : [Item(World.Item), StartFacing(World.Cell)] }
 
 entry : Str -> Try(Entry, [Bad])
 entry = |line| {
 	parts = Str.split_on(line, " ").keep_if(|part| part != "")
 	match parts {
-		["start", x, y, z, face, forward] => {
-			block = cell_of(x, y, z)?
-			f = axis(face)?
-			fwd = axis(forward)?
-			if Grid.dot(f, fwd) == 0 {
-				Ok(Start({ block, face: f, forward: fwd }))
+		["start", x, y, z, face_name, forward_name] => {
+			block = parse_cell(x, y, z)?
+			face = axis(face_name)?
+			forward = axis(forward_name)?
+			if Grid.dot(face, forward) == 0 {
+				Ok({ block, face, kind: StartFacing(forward) })
 			} else {
 				Err(Bad)
 			}
 		}
-		[x, y, z, face, name] => {
-			block = cell_of(x, y, z)?
-			f = axis(face)?
-			item = match name {
+		[x, y, z, face_name, item_name] => {
+			block = parse_cell(x, y, z)?
+			face = axis(face_name)?
+			item = match item_name {
 				"key" => Ok(Key)
 				"exit" => Ok(Exit)
 				_ => Err(Bad)
 			}?
-			Ok(Item({ block, face: f, item }))
+			Ok({ block, face, kind: Item(item) })
 		}
 		_ => Err(Bad)
 	}
 }
 
-cell_of : Str, Str, Str -> Try(World.Cell, [Bad])
-cell_of = |x, y, z| Ok({ x: number(x)?, y: number(y)?, z: number(z)? })
+parse_cell : Str, Str, Str -> Try(World.Cell, [Bad])
+parse_cell = |x, y, z| Ok({ x: parse_signed_int(x)?, y: parse_signed_int(y)?, z: parse_signed_int(z)? })
 
 axis : Str -> Try(World.Cell, [Bad])
 axis = |name| match name {
@@ -159,9 +155,9 @@ axis = |name| match name {
 	_ => Err(Bad)
 }
 
-# A cell index: decimal digits with an optional leading minus.
-number : Str -> Try(I32, [Bad])
-number = |text| {
+# At most 6 digits, so the value cannot overflow an I32.
+parse_signed_int : Str -> Try(I32, [Bad])
+parse_signed_int = |text| {
 	bytes = Str.to_utf8(text)
 	digits = if bytes.first() == Ok('-') {
 		bytes.drop_first(1)
@@ -262,7 +258,7 @@ expect Level.parse("##\n\n0 0 x +y key\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n0 0 0 +y key extra\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n5 0 0 +y key\nstart 0 0 0 +y -z\n") == Err(NoBlock(3))
 expect Level.parse("##\n\nstart 0 -1 0 +y -z\n") == Err(NoBlock(3))
-expect number("-12") == Ok(-12) and number("034") == Ok(34) and number("-") == Err(Bad) and number("") == Err(Bad)
+expect parse_signed_int("-12") == Ok(-12) and parse_signed_int("034") == Ok(34) and parse_signed_int("-") == Err(Bad) and parse_signed_int("") == Err(Bad) and parse_signed_int("1234567") == Err(Bad)
 
 expect Level.count == 3
 expect Level.parse(Level.text(4)) == Err(NoStart)
