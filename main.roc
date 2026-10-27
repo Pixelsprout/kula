@@ -19,6 +19,7 @@ import View
 import Theme
 import Hud
 import Pickup
+import Flash
 
 Model : Rules.Model
 
@@ -65,7 +66,7 @@ loaded = |model, pack, manifest| {
 step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
-	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.collect, Rules.exit, Rules.fall]
+	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
@@ -169,7 +170,7 @@ view = |model| {
 		playing_ball_tint
 	}
 	ball = View.ball_draw(model.ball, model.meshes.ball, ball_tint)
-	lights = theme.lights.map(|light| Light(light))
+	lights = theme.lights.concat(Flash.lights(model.flashes, theme.lights)).map(|light| Light(light))
 	draws = blocks.concat(pickups).append(ball).map(|draw| Draw(draw))
 	{ ..Scene.empty, camera, nodes: lights.concat(draws), sky: model.meshes.sky, ui: Hud.ui(model) }
 }
@@ -358,6 +359,31 @@ expect {
 		_ => False
 	}
 }
+
+# The key pickup lights a Point light one cell above the key's face. It peaks
+# in pale blue and is gone 0.66 s after the pickup.
+expect {
+	before_key = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 8 } })
+	rolling = step(before_key, up_held, QueryResults.empty, 0.01).model
+	picked = step(step(rolling, idle, QueryResults.empty, 0.1).model, idle, QueryResults.empty, 0.1).model
+	peak = step(picked, idle, QueryResults.empty, 0.1).model
+	faded = step(peak, idle, QueryResults.empty, 0.56).model
+	flash_pos = { x: 0.0, y: 1.5, z: 7.0 }
+	picked.keys_left == 1
+		and point_lights(view(picked)) == [Light.point(flash_pos, Flash.colour(0.0), 2.0)]
+			and point_lights(view(peak)) == [Light.point(flash_pos, Flash.colour(0.1), 2.0)]
+				and Flash.colour(0.1).b > Flash.colour(0.1).r
+					and point_lights(view(faded)) == []
+						and lights_in(view(faded)) == Theme.of_level(1).lights
+}
+
+point_lights : Vocabulary.Scene -> List(Vocabulary.Light)
+point_lights = |scene| lights_in(scene).keep_if(
+	|light| match light {
+		Point(_) => True
+		_ => False
+	},
+)
 
 at_pose : Model, World.Pose -> Model
 at_pose = |model, pose| { ..model, ball: Ball.start(pose) }
