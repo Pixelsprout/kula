@@ -232,6 +232,12 @@ A table in Kula code maps each level to its Theme.
 | Pickup flash | Collecting a pickup brightens nearby faces for a short time and emits particles (`light_effect.c`) | Code | A short point light at the pickup that fades. Pickups are unlit |
 | Highlights | Not applicable | | A fixed tone map before the sRGB encode |
 
+## Levels
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| Level entries | An object block holds one object slot for each face, so a key, the exit or the spawn can sit on any face. The spawn face sets the ball's up and a start forward. The spawn rotation then turns the forward (`SetPlayerRotation`, `src/level_update2.c:1206`, called at `:386`) | Code | An entry puts a key, the exit or the start on any face of a block. A start entry names its forward. `scripts/convert_level.py` writes the forward of the turned spawn |
+
 ## Not copied
 
 - The speed-up at the start of a roll.

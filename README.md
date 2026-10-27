@@ -11,7 +11,7 @@ copies.
 ## Run
 
 Kula needs only Roc. Install the Roc nightly `nightly-2026-10-11-7d256b9`.
-The v0.4.0 release built the bundles with it. Then, from this directory:
+The v0.6.0-rc.1 release built the bundles with it. Then, from this directory:
 
 ```sh
 roc main.roc
@@ -20,14 +20,14 @@ roc test main.roc
 
 Roc downloads the platform and the packages from the bundle URLs in the
 `main.roc` header. They come from the
-[rocco v0.4.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.4.0):
+[rocco v0.6.0-rc.1 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.6.0-rc.1):
 
 | Bundle | URL |
 |---|---|
-| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/platform-CdUrA58dQQFQLxKFBNEc9vtFP652ZwvQ5Tb59GYDCrUQ.tar.zst |
-| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst |
-| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst |
-| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst |
+| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/platform-DovzqwbAVit5yFpSzvKzqgwS8dpakvq2mdQJH3qcAHkb.tar.zst |
+| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst |
+| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/mesh-5Fmg6uFHADmSBmZxNWDg25VStK6mU7YqhkWEXHjMEGNP.tar.zst |
+| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst |
 
 To move to a new rocco release, copy the URLs and the nightly from its
 release notes into the header and this table.
@@ -74,9 +74,14 @@ Roc installed. It checks the header, then runs `roc fmt --check`, `roc check`,
 | Up and Space | Jump forward |
 | Space during a roll | Jump forward |
 | Escape | Quit |
+| Pad DpadUp, or the left stick more than half way up, held | Roll forward, as Up |
+| Pad DpadLeft | Turn 90° left |
+| Pad DpadRight | Turn 90° right |
+| Pad South | Jump, as Space |
+| Pad Start | Quit |
 
 Left, Right and Space act on the press. Hold Up to keep rolling. Escape
-quits at any time. The controls are tank controls: they are relative to the
+quits at any time. The pad buttons act the same way, on any connected pad. The controls are tank controls: they are relative to the
 ball, not to the screen.
 
 A move starts only when the ball is still and not turning. Two moves also
