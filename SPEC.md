@@ -238,6 +238,38 @@ A table in Kula code maps each level to its Theme.
 |---|---|---|---|
 | Level entries | An object block holds one object slot for each face, so a key, the exit or the spawn can sit on any face. The spawn face sets the ball's up and a start forward. The spawn rotation then turns the forward (`SetPlayerRotation`, `src/level_update2.c:1206`, called at `:386`) | Code | An entry puts a key, the exit or the start on any face of a block. A start entry names its forward. `scripts/convert_level.py` writes the forward of the turned spawn |
 
+## Items
+
+The original collects an item when the ball centre comes near the item
+centre. It does not test the ball's cell or face (`HandleItemTouching`,
+`src/level_update3.c:113-323`, Code). The clone copies this test for keys.
+Coins and fruit are not in the clone yet. The Original column gives their
+numbers too.
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| When the test runs | Every frame while the player has control and the game is not paused (`level_update2.c:538-540`) | Code | Every step in `Playing`, after the ball moves (`Rules.collect`) |
+| Items tested | Every item slot on the six faces of the 3 × 3 × 3 blocks round the ball (`level_update3.c:119-131`) | Code | Every pickup in the level. The reach is less than one cell, so the result is the same (Inferred) |
+| Test | The squared distance from the ball centre to the item centre is below the item's `collisionDistance` + 10000 (`level_update3.c:138-144`) | Code | Same, in cells (`Pickup.touches`) |
+| Reach | `collisionDistance` is 22500 for a key, 25600 for a coin and 32400 for a fruit (`level_update2.c:131, 154, 188`). With the 10000, a key reaches 180 units (0.35 cell), a coin 189 (0.37) and a fruit 206 (0.40) | Code (numbers), Inferred (roots) | Key: 0.35 cell |
+| Height above the face | The item moves out from the block centre by 386 for a key or a fruit and 406 for a coin (`level_update2.c:133, 156, 191`). The face is 256 out, so a key or a fruit is 130 units above the face and a coin 150 | Code (numbers), Inferred (face) | Key: 130 units, 0.25 cell |
+| Spin | Key and coin: -90/4096 of a turn a frame about the face normal (`level_update3.c:457-466`). Fruit: +24/4096 (`:447`) | Code | Key: the same rate, 1.10 turns a second. The direction is not checked |
+| Bob | 10 + 20 sin(phase) units along the face normal. The phase changes by -70/4096 a frame for a key or a coin (`:461-462`) and by -60/4096 for a fruit (`:449-450`) | Code | Key: same. The centre moves from 120 to 160 units above the face |
+| Tilt | Fruit only: up to 150/4096 of a turn about an axis in the face. Its phase changes by -80/4096 a frame (`:448, 452`) | Code | `Pickup.rot` applies a tilt about the item's x axis after the spin. No item tilts yet |
+| Item centre in the test | Includes the bob. The draw code writes `itemState.pos` each frame (`level_update3.c:526-529`) | Code | Same (`Pickup.centre`) |
+| Start phases | Random, 0 to 4095, for the spin, tilt and bob of each item (`level_update2.c:209-214`) | Code | Spread by the golden ratio from the item's place in the level, so a restart looks the same |
+| After a pickup | The slot clears and the item stops drawing (`level_update3.c:316-319`) | Code | The pickup leaves `Model.pickups` and stops drawing |
+
+A pickup can happen at any point of a move: in a roll, a climb, a turn or
+a jump (Inferred). In a roll onto a key's cell, the ball collects the key
+about a third of a cell before the cell centre.
+
+A forward jump passes 0.695 cell above the face of its middle cell. A key
+on that face bobs at most 0.31 cell up, so the gap is at least 0.38 cell
+and the key stays (Inferred). At the top of the jump, a key on a wall
+beside the middle cell is at most 0.33 cell from the ball centre, so the
+jump collects it (Inferred).
+
 ## Not copied
 
 - The speed-up at the start of a roll.

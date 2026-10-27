@@ -173,9 +173,13 @@ back and the exit closes.
 
 ## Keys and the exit
 
-- A key sits on one face of a block. The ball collects it when a move onto
-  that face commits: the ball's cell and up must match the key's. A
-  collected key disappears.
+- A key sits on one face of a block. It spins and bobs above the face.
+- The ball collects a key when the ball centre comes within 0.35 cell of the
+  key centre, as in the original. The test runs every step in `Playing`, so
+  a key collects in the middle of a roll or a jump. A collected key
+  disappears.
+- A forward jump passes too high over a key on the floor of the cell it
+  jumps over, so that key stays. See `SPEC.md`, Items.
 - The exit is a block. It is open when the ball has collected every key.
   An open exit draws brighter than a closed one.
 - When the ball moves onto the face of the open exit of level 1 or 2, the
