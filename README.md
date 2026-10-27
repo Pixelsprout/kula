@@ -390,7 +390,7 @@ Kula's levels never show them.
 |---|---|
 | `assets/meshes/<theme>_face.glb` | A 1 × 1 quad facing +y, one-sided, with the Theme's texture |
 | `assets/meshes/ball.glb` | A sphere of diameter 1 with eight white and red wedges |
-| `assets/meshes/coin.glb` | A bronze metal disc 0.4 wide, with a raised rim and a bevelled edge. It stands on its edge, with its faces along ±z |
+| `assets/meshes/coin.glb` | A bronze disc 0.4 wide, with a raised rim and a bevelled edge. Metallic 0.4, so the flat face stays bronze with no environment map. It stands on its edge, with its faces along ±z |
 | `assets/meshes/apple.glb` | A red apple 0.39 wide with a stem and a leaf |
 | `assets/meshes/watermelon.glb` | A striped watermelon 0.48 long, lying along ±z |
 | `assets/meshes/pumpkin.glb` | A ribbed orange pumpkin 0.44 wide with a stem |
