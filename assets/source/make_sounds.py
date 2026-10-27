@@ -76,7 +76,28 @@ def chime():
     return samples
 
 
+# A rising jingle for a fruit: four quick notes up a major chord to the
+# octave, each a soft mallet tone with a warm second partial.
+def jingle():
+    length = 0.6
+    notes = [(0.0, 1046.5), (0.06, 1318.5), (0.12, 1568.0), (0.18, 2093.0)]
+    samples = []
+    for i in range(int(length * RATE)):
+        t = i / RATE
+        sound = 0.0
+        for start, freq in notes:
+            since = t - start
+            if since < 0.0:
+                continue
+            attack = min(since / 0.003, 1.0)
+            tone = math.sin(TAU * freq * since) + 0.35 * math.exp(-since / 0.05) * math.sin(TAU * 2.0 * freq * since)
+            sound += attack * math.exp(-since / 0.14) * tone
+        samples.append(0.3 * tail(t, length, 0.05) * sound)
+    return samples
+
+
 folder = os.path.join(ASSETS, "sound")
 os.makedirs(folder, exist_ok=True)
 write(os.path.join(folder, "bounce.wav"), bounce())
 write(os.path.join(folder, "chime.wav"), chime())
+write(os.path.join(folder, "jingle.wav"), jingle())
