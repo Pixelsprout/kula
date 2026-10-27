@@ -1,13 +1,16 @@
-# Renders each Theme's sky for Kula: six PNGs in assets/sky/<theme>/. Run from the repository root:
+# Makes each Theme's sky for Kula: six PNGs in assets/sky/<theme>/. Run from the repository root:
 #   /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_skies.py
+# Names after a "--" make only those skies, for example "-- hiro".
 #
-# A Blender sky texture lights an empty world. One 90 degree camera renders
+# A painted sky is a function of the view direction, sampled for each texel.
+# A rendered sky is a Blender sky texture that lights an empty world. One 90 degree camera renders
 # each cube face. The face layout is the one engine/sky.odin states: face px
 # holds the directions nearest +x, with its top row towards +y and its left
 # column towards +z.
 
 import math
 import os
+import sys
 
 import bpy
 import numpy
@@ -197,5 +200,181 @@ def render_theme(theme):
         mirror(path)
 
 
-for theme in THEMES:
-    render_theme(theme)
+def write_face(path, srgb):
+    image = bpy.data.images.new("face", SIDE, SIDE, alpha=False)
+    rgba = numpy.ones((SIDE, SIDE, 4), dtype=numpy.float32)
+    # Blender's first pixel row is the bottom one.
+    rgba[:, :, :3] = srgb[::-1] / 255.0
+    image.pixels.foreach_set(rgba.ravel())
+    image.filepath_raw = path
+    image.file_format = "PNG"
+    image.save()
+    bpy.data.images.remove(image)
+
+
+# Each face is supersampled SUPERSAMPLE x SUPERSAMPLE times, so pyramid edges are smooth.
+SUPERSAMPLE = 3
+
+
+def paint_theme(name, paint):
+    clear_scene()
+    out = os.path.join(SKY, name)
+    os.makedirs(out, exist_ok=True)
+    n = SIDE * SUPERSAMPLE
+    t = (2.0 * numpy.arange(n) + 1.0) / n - 1.0
+    u, v = numpy.meshgrid(t, t)
+    for face, direction in FACES.items():
+        x, y, z = direction(u, v)
+        d = numpy.stack(numpy.broadcast_arrays(x, y, z), axis=-1).astype(numpy.float64)
+        d /= numpy.linalg.norm(d, axis=-1, keepdims=True)
+        colour = paint(d).reshape(SIDE, SUPERSAMPLE, SIDE, SUPERSAMPLE, 3).mean(axis=(1, 3))
+        write_face(os.path.join(out, face + ".png"), numpy.round(numpy.clip(colour, 0.0, 255.0)))
+
+
+def smoothstep(edge0, edge1, x):
+    t = numpy.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+# Value noise on a plane from a fixed lattice, so a rerun paints the same sky.
+LATTICE = numpy.random.default_rng(1998).random((256, 256))
+
+
+def value_noise(px, py):
+    ix = numpy.floor(px)
+    iy = numpy.floor(py)
+    fx = px - ix
+    fy = py - iy
+    ix = ix.astype(numpy.int64) & 255
+    iy = iy.astype(numpy.int64) & 255
+    sx = fx * fx * (3.0 - 2.0 * fx)
+    sy = fy * fy * (3.0 - 2.0 * fy)
+    a = LATTICE[iy, ix]
+    b = LATTICE[iy, (ix + 1) & 255]
+    c = LATTICE[(iy + 1) & 255, ix]
+    e = LATTICE[(iy + 1) & 255, (ix + 1) & 255]
+    return (a + (b - a) * sx) + ((c + (e - c) * sx) - (a + (b - a) * sx)) * sy
+
+
+def fbm(px, py, octaves):
+    total = numpy.zeros_like(px)
+    amplitude = 0.5
+    for k in range(octaves):
+        total += amplitude * value_noise(px * 2.0**k + 17.0 * k, py * 2.0**k + 31.0 * k)
+        amplitude *= 0.5
+    return total / (1.0 - 0.5**octaves)
+
+
+def ramp(keys, x):
+    xs = [k[0] for k in keys]
+    return numpy.stack([numpy.interp(x, xs, [k[1][c] for k in keys]) for c in range(3)], axis=-1)
+
+
+# The Hiro sky: a white zenith, blue sky with soft clouds, pyramids on the
+# horizon and orange sand below. The sRGB colours by elevation in degrees are
+# the band averages of the original's Hiro skybox (HIRO.TGI). Every pixel is
+# painted here; no texture of the original is used.
+HIRO_SKY = [
+    (0.0, (150, 178, 186)),
+    (3.75, (112, 159, 173)),
+    (11.25, (91, 152, 184)),
+    (18.75, (78, 141, 183)),
+    (26.25, (79, 134, 183)),
+    (33.75, (80, 130, 183)),
+    (41.25, (79, 127, 184)),
+    (48.75, (83, 129, 189)),
+    (56.25, (98, 142, 195)),
+    (63.75, (120, 165, 206)),
+    (71.25, (168, 200, 223)),
+    (78.75, (228, 244, 246)),
+    (86.25, (255, 255, 255)),
+    (90.0, (255, 255, 255)),
+]
+HIRO_SAND = [
+    (-90.0, (218, 131, 34)),
+    (-78.75, (216, 130, 32)),
+    (-71.25, (212, 127, 30)),
+    (-63.75, (210, 125, 30)),
+    (-56.25, (212, 126, 31)),
+    (-48.75, (206, 121, 26)),
+    (-41.25, (190, 110, 22)),
+    (-33.75, (183, 103, 17)),
+    (-26.25, (189, 108, 25)),
+    (-18.75, (201, 121, 37)),
+    (-11.25, (204, 129, 53)),
+    (-3.0, (214, 150, 88)),
+    (0.0, (222, 172, 118)),
+]
+HIRO_CLOUD = (238, 244, 248)
+# Azimuth in degrees from -z towards +x, half width and height in degrees, and
+# how far each fades into the horizon colour. The first faces the start view.
+HIRO_PYRAMIDS = [
+    (-38.0, 9.0, 7.0, 0.55),
+    (-12.0, 10.0, 8.0, 0.45),
+    (-24.0, 22.0, 17.0, 0.0),
+    (-6.0, 4.0, 3.0, 0.15),
+    (-46.0, 3.0, 2.2, 0.1),
+    (150.0, 12.0, 9.0, 0.5),
+]
+HIRO_PYRAMID_LIT = (232, 166, 96)
+HIRO_PYRAMID_SHADE = (184, 116, 62)
+# Theme.roc's hiro sun dir, reversed: where the light comes from.
+HIRO_SUN = numpy.array((2.0, 3.0, 6.0)) / 7.0
+HIRO_SUN_COLOUR = numpy.array((255.0, 252.0, 238.0))
+
+
+def paint_hiro(d):
+    x, y, z = d[..., 0], d[..., 1], d[..., 2]
+    elevation = numpy.degrees(numpy.arcsin(numpy.clip(y, -1.0, 1.0)))
+    azimuth = numpy.degrees(numpy.arctan2(x, -z))
+    sky = ramp(HIRO_SKY, numpy.maximum(elevation, 0.0))
+
+    # Clouds lie on a flat layer above the ground, so they thin out and shrink towards the horizon.
+    up = numpy.maximum(y, 0.05)
+    cloud = fbm(x / up * 1.6, z / up * 3.2, 5)
+    cover = smoothstep(0.52, 0.78, cloud) * smoothstep(6.0, 18.0, elevation) * (1.0 - smoothstep(55.0, 72.0, elevation))
+    sky += (numpy.array(HIRO_CLOUD) - sky) * (0.75 * cover)[..., None]
+
+    sun_angle = numpy.degrees(numpy.arccos(numpy.clip(d @ HIRO_SUN, -1.0, 1.0)))
+    glow = 0.45 * numpy.exp(-sun_angle / 7.0) + smoothstep(2.6, 1.8, sun_angle)
+    sky += (HIRO_SUN_COLOUR - sky) * numpy.clip(glow, 0.0, 1.0)[..., None]
+
+    horizon = ramp(HIRO_SKY, numpy.zeros_like(elevation))
+    for centre, half, height, fade in HIRO_PYRAMIDS:
+        offset = (azimuth - centre + 180.0) % 360.0 - 180.0
+        top = height * (1.0 - numpy.abs(offset) / half)
+        inside = smoothstep(-0.25, 0.25, top - elevation) * smoothstep(-1.0, -0.5, elevation)
+        face = numpy.where((offset > 0.0)[..., None], numpy.array(HIRO_PYRAMID_LIT, float), numpy.array(HIRO_PYRAMID_SHADE, float))
+        courses = 1.0 - 0.06 * (numpy.floor(elevation / (height / 12.0)) % 2.0)
+        stone = face * courses[..., None]
+        stone += (horizon - stone) * fade
+        sky += (stone - sky) * inside[..., None]
+
+    # Dunes lie on the ground plane, so they shrink towards the horizon and fade into its haze.
+    down = numpy.maximum(-y, 0.02)
+    dune = fbm(x / down * 0.9, z / down * 0.9, 5)
+    ridge = 1.0 - numpy.abs(2.0 * fbm(x / down * 0.35 + 5.0, z / down * 0.6, 3) - 1.0)
+    shade = 1.0 + (0.3 * (dune - 0.5) + 0.22 * (ridge - 0.6)) * smoothstep(0.0, 0.12, -y)
+    sand = ramp(HIRO_SAND, numpy.minimum(elevation, 0.0)) * shade[..., None]
+
+    below = smoothstep(0.0, -0.6, elevation)[..., None]
+    return sky + (sand - sky) * below
+
+
+PAINTED = {"hiro": paint_hiro}
+
+
+def chosen(argv):
+    known = [theme["name"] for theme in THEMES] + list(PAINTED)
+    names = argv[argv.index("--") + 1:] if "--" in argv else known
+    unknown = [name for name in names if name not in known]
+    if unknown:
+        raise SystemExit("make_skies.py: no sky named " + ", ".join(unknown))
+    return names
+
+
+for name in chosen(sys.argv):
+    if name in PAINTED:
+        paint_theme(name, PAINTED[name])
+    else:
+        render_theme(next(theme for theme in THEMES if theme["name"] == name))
