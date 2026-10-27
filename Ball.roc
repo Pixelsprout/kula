@@ -117,6 +117,19 @@ Ball := [].{
 	landed : Ball.Ball, Ball.Ball -> Bool
 	landed = |before, after| can_touch_down(before.motion) and !can_touch_down(after.motion)
 
+	# The pose whose face is under the ball centre. As in the original, a roll
+	# reaches its new cell when the centre passes the half-cell line.
+	standing : Ball.Ball -> Try(World.Pose, [InAir])
+	standing = |ball| match ball.motion {
+		Still => Ok(ball.pose)
+		Rolling({ from, t }) => if t < 0.5 {
+			Ok(from)
+		} else {
+			Ok(ball.pose)
+		}
+		_ => Err(InAir)
+	}
+
 	# A roll or a jump starts only from Still with no turn running. A floor roll,
 	# or an edge roll before the edge, can also start a jump. A turn can start
 	# during a jump in place.
@@ -969,4 +982,10 @@ expect {
 	placed = Ball.interpolated(Ball.advance(Ball.act(floor_ahead, jumping_in_place, TurnLeft), 0.16))
 	s = 0.70710678
 	placed.pos.y > 1.0 and near_vec3(placed.forward, { x: -s, y: 0.0, z: -s })
+}
+
+# A roll stands on its new cell from half way. A jump stands on no cell.
+expect {
+	rolling = Ball.act(floor_ahead, still, Roll)
+	Ball.standing(still) == Ok(on_origin) and Ball.standing(Ball.advance(rolling, 0.12)) == Ok(on_origin) and Ball.standing(Ball.advance(rolling, 0.13)) == Ok(rolling.pose) and Ball.standing(Ball.act(floor_ahead, still, forward_jump)) == Err(InAir)
 }

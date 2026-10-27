@@ -6,11 +6,44 @@ import Ball
 import Clock
 import Fruit
 import Level
+import Ending
 
 Hud := [].{
+	# As in the original, the HUD hides once the level ends, and the level end panel shows.
 	ui : Rules.Model -> List(Element)
-	ui = |model| [bottom_row(model), fruit_corner(model)].concat(time(model))
+	ui = |model| match Rules.ending(model.phase) {
+		Ok(ending) => end_panels(model, ending)
+		Err(NotEnded) => [bottom_row(model), fruit_corner(model)].concat(time(model))
+	}
 }
+
+# As in the original, WELL DONE fades in at the top centre. The level score and
+# the total count up together below the middle of the screen.
+end_panels : Rules.Model, Ending.Ending -> List(Element)
+end_panels = |model, ending| {
+	counted = Ending.counted(ending)
+	before = model.score.total - ending.banked
+	shown = Ending.banner(ending)
+	banner = Box(
+		{ ..Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), pad: Ui.pad_all(16.0), background: { r: 0.0, g: 0.0, b: 0.0, a: 0.5 * shown } },
+		[Text({ ..Ui.label("WELL DONE"), size: 56.0, color: { r: 1.0, g: 0.85, b: 0.2, a: shown } })],
+	)
+	scores = Box({ ..panel, direction: Col, gap: 4.0 }, [Text(Ui.label("Level ${counted.to_str()}")), Text(Ui.label("Score ${(before + counted).to_str()}"))])
+	prompt = if Ending.finished(ending) {
+		[Text(Ui.label("Press Space"))]
+	} else {
+		[]
+	}
+	summary = Box(
+		{ ..Ui.float_at(CenterCenter, { x: 0.0, y: summary_drop }), direction: Col, gap: 12.0, child_align: { x: Center, y: Center } },
+		[scores].concat(prompt),
+	)
+	[banner, summary]
+}
+
+# The original draws the score summary from 12 to 75 pixels below the middle of its 256-pixel screen.
+summary_drop : F32
+summary_drop = 120.0
 
 # As in the original, the Time panel sits at the top centre.
 time : Rules.Model -> List(Element)
@@ -101,3 +134,41 @@ fruit_text = |model| match Hud.ui(model) {
 # The fruit panel sits at the bottom right and counts the fruit set out of five.
 expect fruit_text(Rules.start(View.primitive_meshes, 1)) == "Fruit 0 / 5"
 expect fruit_text({ ..one_key, fruits: { now: [Apple], saved: [] } }) == "Fruit 1 / 5"
+
+end_texts : Rules.Model -> List(Str)
+end_texts = |model| match Hud.ui(model) {
+	[Box(_, [Text(banner)]), Box(_, [Box(_, [Text(level), Text(total)]), .. as rest])] =>
+		[banner.str, level.str, total.str].concat(
+			rest.map(
+				|element| match element {
+					Text(text) => text.str
+					_ => ""
+				},
+			),
+		)
+	_ => []
+}
+
+# The ball reached the exit of level 1 with 3000 points, and the exit banked them on a total of 2000.
+ended : F32 -> Rules.Model
+ended = |seconds| {
+	start = Rules.start(View.primitive_meshes, 1)
+	{ ..start, score: { level: 0, total: 5000 }, phase: Ending({ ..Ending.start(3000), seconds }) }
+}
+
+# The level end panel replaces the HUD. Its count starts at the old total.
+expect end_texts(ended(0.0)) == ["WELL DONE", "Level 0", "Score 2000"]
+
+# After 0.5 s the count has reached 2500, and the banner is under a third of the way in.
+expect {
+	half = ended(0.5)
+	alpha = match Hud.ui(half) {
+		[Box(_, [Text(banner)]), _] => banner.color.a
+		_ => -1.0
+	}
+	end_texts(half) == ["WELL DONE", "Level 2500", "Score 4500"] and alpha > 0.29 and alpha < 0.3
+}
+
+# Once the banner and the count finish, a prompt asks for the press. Cleared keeps the panel.
+expect end_texts(ended(2.0)) == ["WELL DONE", "Level 3000", "Score 5000", "Press Space"]
+expect end_texts({ ..ended(2.0), phase: Cleared({ ..Ending.start(3000), seconds: 2.0 }) }) == ["WELL DONE", "Level 3000", "Score 5000", "Press Space"]

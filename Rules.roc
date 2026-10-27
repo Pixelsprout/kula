@@ -7,10 +7,14 @@ import Score
 import Clock
 import Fruit
 import Sounds
+import Ending
 
 Rules := [].{
-	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
-	Phase : [Playing, Cleared, Starting(F32), Won]
+	# Exiting holds the seconds left before the level ends, once the ball is on the
+	# open exit. Ending runs the level end sequence. Cleared keeps it on screen
+	# while the next level's Theme loads. Starting holds the seconds left before
+	# the new level plays.
+	Phase : [Playing, Exiting(F32), Ending(Ending.Ending), Cleared(Ending.Ending), Starting(F32), Won]
 
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
@@ -36,7 +40,48 @@ Rules := [].{
 		} else {
 			{ ..model, phase: Playing }
 		}
+		Exiting(seconds) => if seconds - dt > 0.0 {
+			{ ..model, phase: Exiting(seconds - dt) }
+		} else {
+			end_level(model)
+		}
 		_ => model
+	}
+
+	# pressed is a press of Space or South in this step. Each level but the last goes on to Cleared.
+	run_ending : Bool, F32 -> (Model -> Model)
+	run_ending = |pressed, dt| |model| match model.phase {
+		Ending(ending) => {
+			later = Ending.advance(ending, dt)
+			if pressed {
+				match Ending.press(later) {
+					Skip(skipped) => { ..model, phase: Ending(skipped) }
+					Go => if model.level_number < Level.count {
+						{ ..model, phase: Cleared(later) }
+					} else {
+						{ ..model, phase: Won }
+					}
+				}
+			} else {
+				{ ..model, phase: Ending(later) }
+			}
+		}
+		Cleared(ending) => { ..model, phase: Cleared(Ending.advance(ending, dt)) }
+		_ => model
+	}
+
+	# The level end sequence, from the level end until the next level starts.
+	ending : Phase -> Try(Ending.Ending, [NotEnded])
+	ending = |phase| match phase {
+		Ending(sequence) => Ok(sequence)
+		Cleared(sequence) => Ok(sequence)
+		_ => Err(NotEnded)
+	}
+
+	cleared : Phase -> Bool
+	cleared = |phase| match phase {
+		Cleared(_) => True
+		_ => False
 	}
 
 	move_pickups : F32 -> (Model -> Model)
@@ -49,7 +94,7 @@ Rules := [].{
 	# while the player has control. So a pickup can happen at any point of a move.
 	collect : Model -> Model
 	collect = |model|
-		if model.phase == Playing {
+		if plays(model.phase) {
 			centre = Ball.centre(model.ball)
 			split = model.pickups.fold(
 				{ taken: [], left: [] },
@@ -71,28 +116,31 @@ Rules := [].{
 	exit_open : Model -> Bool
 	exit_open = |model| model.keys_left == 0
 
+	# As in the original, a landing on the open exit ends the level in the next
+	# step. A roll ends it 5 PAL frames after the ball reaches the exit cell, and
+	# the ball rolls on toward the cell centre.
 	exit : Model -> Model
 	exit = |model|
-		if model.phase == Playing and exit_open(model) and has_item(model.level, model.ball.pose, Exit) {
+		if model.phase == Playing and exit_open(model) and on_exit(model) {
 			{
 				..model,
-				score: Score.bank(model.score),
-				fruits: Fruit.bank(model.fruits),
-				phase: if model.level_number < Level.count {
-					Cleared
-				} else {
-					Won
-				},
+				phase: Exiting(
+					if model.ball.motion == Still {
+						0.0
+					} else {
+						exit_delay
+					},
+				),
 			}
 		} else {
 			model
 		}
 
-	# As in the original, the clock runs only while the player has control. At 0
-	# the level ends as a death, the same as a fall.
+	# As in the original, the clock runs only while the level plays. At 0 the
+	# level ends as a death, the same as a fall.
 	run_clock : Model -> Model
 	run_clock = |model|
-		if model.phase != Playing {
+		if !plays(model.phase) {
 			model
 		} else if model.clock <= 1 {
 			restart(model)
@@ -101,13 +149,36 @@ Rules := [].{
 		}
 
 	fall : Model -> Model
-	# A restart in Cleared would leave the next Theme's pack loaded with no level to take it.
-	fall = |model| if model.phase != Cleared and Ball.fell_off(model.ball) {
+	# After the level end, a restart would take back the banked score. In Cleared
+	# it would also leave the next Theme's pack loaded with no level to take it.
+	fall = |model| if Rules.ending(model.phase) == Err(NotEnded) and Ball.fell_off(model.ball) {
 		restart(model)
 	} else {
 		model
 	}
 }
+
+# As in the original, the level keeps playing in the frames before an exit ends
+# it: the clock runs and the ball collects. Only the input stops.
+plays : Rules.Phase -> Bool
+plays = |phase| match phase {
+	Playing => True
+	Exiting(_) => True
+	_ => False
+}
+
+on_exit : Rules.Model -> Bool
+on_exit = |model| match Ball.standing(model.ball) {
+	Ok(pose) => has_item(model.level, pose, Exit)
+	Err(InAir) => False
+}
+
+exit_delay : F32
+exit_delay = 0.1
+
+# As in the original, the score and the fruit bank when the level ends, not when the ball reaches the exit.
+end_level : Rules.Model -> Rules.Model
+end_level = |model| { ..model, score: Score.bank(model.score), fruits: Fruit.bank(model.fruits), phase: Ending(Ending.start(model.score.level)) }
 
 parse_or_crash : Str -> World.Level
 parse_or_crash = |text| match Level.parse(text) {
@@ -182,21 +253,63 @@ expect {
 expect Ok(Rules.start(meshes, 2).level) == Level.parse(Level.text(2))
 expect Rules.start(meshes, 3).keys_left == 1 and Rules.start(meshes, 3).level_number == 3
 
-# The exit of a level before the last clears it. The last level's exit wins.
+# The ball still on the open exit ends the level in the next step.
 expect {
 	open = { ..Rules.start(meshes, 1), keys_left: 0 }
-	Rules.exit(at(open, exit_cell)).phase == Cleared
+	reached = Rules.exit(at(open, exit_cell))
+	reached.phase == Exiting(0.0) and Rules.count_down(0.01)(reached).phase == Ending(Ending.start(0))
 }
 
 expect {
 	last = Rules.start(meshes, 3)
 	open = { ..last, keys_left: 0 }
-	Rules.exit(at(open, last_exit_cell)).phase == Won and Rules.exit(open).phase == Playing
+	Rules.exit(at(open, last_exit_cell)).phase == Exiting(0.0) and Rules.exit(open).phase == Playing
+}
+
+# A roll from (0, 1, 1) onto the open exit at roll progress t.
+rolling_onto_exit : F32 -> Rules.Model
+rolling_onto_exit = |t| {
+	open = { ..at(Rules.start(meshes, 1), exit_cell), keys_left: 0 }
+	{ ..open, ball: { ..open.ball, motion: Rolling({ from: { ..open.ball.pose, cell: cell(0, 1, 1) }, t }) } }
+}
+
+# A roll reaches the exit half way, then the level ends 0.1 s later.
+expect {
+	reached = Rules.exit(rolling_onto_exit(0.5))
+	waiting = Rules.count_down(0.05)(reached)
+	Rules.exit(rolling_onto_exit(0.45)).phase == Playing
+		and reached.phase == Exiting(0.1)
+			and waiting.phase == Exiting(0.05)
+				and Rules.count_down(0.05)(waiting).phase == Ending(Ending.start(0))
+}
+
+# Finishes a level whose ball stands on the open exit.
+finish : Rules.Model -> Rules.Model
+finish = |model| Rules.count_down(0.01)(Rules.exit(model))
+
+# In Ending the first press finishes the banner and the count. The next press
+# goes on: to Cleared before the last level, to Won after it.
+expect {
+	ended = finish({ ..at(Rules.start(meshes, 1), exit_cell), keys_left: 0, score: { level: 3000, total: 0 } })
+	skipped = Rules.run_ending(True, 0.01)(ended)
+	cleared = Rules.run_ending(True, 0.01)(skipped)
+	last = finish({ ..at(Rules.start(meshes, 3), last_exit_cell), keys_left: 0 })
+	skipped.phase == Ending({ seconds: 0.01, banked: 3000, skipped: True })
+		and cleared.phase == Cleared({ seconds: 0.02, banked: 3000, skipped: True })
+			and Rules.run_ending(False, 0.5)(cleared).phase == Cleared({ seconds: 0.52, banked: 3000, skipped: True })
+				and Rules.run_ending(True, 0.01)(Rules.run_ending(True, 0.01)(last)).phase == Won
+}
+
+# With no press the sequence runs on and waits.
+expect {
+	ended = finish({ ..at(Rules.start(meshes, 1), exit_cell), keys_left: 0 })
+	waited = Rules.run_ending(False, 3.0)(ended)
+	waited.phase == Ending({ seconds: 3.0, banked: 0, skipped: False }) and Rules.run_ending(True, 0.01)(waited).phase == Cleared({ seconds: 3.01, banked: 0, skipped: False })
 }
 
 # The next level starts with the ball still for a short pause.
 expect {
-	next = Rules.next_level({ ..Rules.start(meshes, 1), phase: Cleared })
+	next = Rules.next_level({ ..Rules.start(meshes, 1), phase: Cleared(Ending.start(0)) })
 	next.level_number == 2 and next.phase == Starting(Rules.start_pause) and next.ball == Ball.start(next.level.start) and next.keys_left == 1
 }
 
@@ -212,9 +325,9 @@ expect {
 }
 
 expect {
-	model = { ..Rules.start(meshes, 1), phase: Cleared }
+	model = Rules.start(meshes, 1)
 	ball = { ..model.ball, motion: Falling({ from: model.level.start, offset: 0.0, over: model.level.start, drop: Off(3), seconds: 1.0, spin_rate: 0.0 }) }
-	Rules.fall({ ..model, ball }).phase == Cleared
+	[Ending(Ending.start(0)), Cleared(Ending.start(0))].all(|phase| Rules.fall({ ..model, ball, phase }).phase == phase)
 }
 
 # The cell (0, 1, 0) holds a key on the +y face of block (0, 0, 0) and an item on the -x face of block (1, 1, 0).
@@ -232,15 +345,16 @@ expect {
 
 expect {
 	open = Rules.collect(on_face(two_faces("exit"), cell(0, 1, 0)))
-	open.keys_left == 0 and Rules.exit(open).phase == Playing and Rules.exit(on_face(open, cell(-1, 0, 0))).phase == Cleared
+	open.keys_left == 0 and Rules.exit(open).phase == Playing and Rules.exit(on_face(open, cell(-1, 0, 0))).phase == Exiting(0.0)
 }
 
 expect Rules.collect(on_face(two_faces("exit"), cell(-1, 0, 0))).keys_left == 1
 
-# Without control the ball collects nothing.
+# Without control the ball collects nothing. In the frames before an exit ends the level, it still collects.
 expect {
 	on_key = at(Rules.start(meshes, 1), key_cell)
-	[Cleared, Starting(0.5), Won].all(|phase| Rules.collect({ ..on_key, phase }).keys_left == 1)
+	[Ending(Ending.start(0)), Cleared(Ending.start(0)), Starting(0.5), Won].all(|phase| Rules.collect({ ..on_key, phase }).keys_left == 1)
+		and Rules.collect({ ..on_key, phase: Exiting(0.1) }).keys_left == 0
 }
 
 # A forward jump from z 2 to z 0, with a key on the wall beside z 1 or on the floor of z 1.
@@ -294,16 +408,16 @@ off_the_level = |model| { ..model, ball: { ..model.ball, motion: Falling({ from:
 # A key adds 1000 to the level score and nothing to the total.
 expect Rules.collect(at(Rules.start(meshes, 1), key_cell)).score == { level: 1000, total: 0 }
 
-# The exit banks the level score, and the next level starts from the banked total.
+# The level end banks the level score, and the next level starts from the banked total.
 expect {
 	open = { ..at(Rules.start(meshes, 1), exit_cell), keys_left: 0, score: { level: 2000, total: 500 } }
-	cleared = Rules.exit(open)
-	cleared.score == { level: 0, total: 2500 } and Rules.next_level(cleared).score == { level: 0, total: 2500 }
+	ended = finish(open)
+	Rules.exit(open).score == open.score and ended.score == { level: 0, total: 2500 } and ended.phase == Ending(Ending.start(2000)) and Rules.next_level(ended).score == { level: 0, total: 2500 }
 }
 
 expect {
 	last = { ..at(Rules.start(meshes, 3), last_exit_cell), keys_left: 0, score: { level: 1000, total: 0 } }
-	Rules.exit(last).score == { level: 0, total: 1000 }
+	finish(last).score == { level: 0, total: 1000 }
 }
 
 # A death on level 2 loses the level score and a penalty of 100.
@@ -322,7 +436,8 @@ expect start_parsed(meshes, 1, parse_or_crash("S\n\ntime 45\n"), Fruit.none).clo
 expect Rules.run_clock(Rules.start(meshes, 1)).clock == Clock.start(Clock.default_seconds) - 1
 expect {
 	model = Rules.start(meshes, 1)
-	[Cleared, Starting(0.5), Won].all(|phase| Rules.run_clock({ ..model, phase }) == { ..model, phase })
+	[Ending(Ending.start(0)), Cleared(Ending.start(0)), Starting(0.5), Won].all(|phase| Rules.run_clock({ ..model, phase }) == { ..model, phase })
+		and Rules.run_clock({ ..model, phase: Exiting(0.1) }).clock == Clock.start(Clock.default_seconds) - 1
 }
 
 # At 0 the level restarts with a full clock and the death penalty, as a fall does.
@@ -342,7 +457,7 @@ expect {
 	sounds = { bounce: 3, chime: 6, tick: 4, jingle: 5 }
 	model = { ..Rules.start(meshes, 1), sounds, clock: 1 }
 	restarted = Rules.run_clock(model)
-	next = Rules.next_level({ ..model, phase: Cleared })
+	next = Rules.next_level({ ..model, phase: Cleared(Ending.start(0)) })
 	restarted.sounds == sounds and next.sounds == sounds and next.clock == Clock.start(Clock.default_seconds)
 }
 
@@ -372,9 +487,9 @@ expect {
 # The exit keeps the fruit for the next level. A later fall does not take it back.
 expect {
 	picked = Rules.collect(on_fruit(fruit_level(Fruit.none)))
-	cleared = Rules.exit(on_face(picked, cell(0, 1, 0)))
+	cleared = finish(on_face(picked, cell(0, 1, 0)))
 	next = Rules.next_level(cleared)
-	cleared.phase == Cleared and cleared.fruits == { now: [Apple], saved: [Apple] } and next.fruits == cleared.fruits and Rules.fall(off_the_level(next)).fruits == cleared.fruits
+	cleared.phase == Ending(Ending.start(2500)) and cleared.fruits == { now: [Apple], saved: [Apple] } and next.fruits == cleared.fruits and Rules.fall(off_the_level(next)).fruits == cleared.fruits
 }
 
 # A fall loses the fruit of the try, as it loses the level score.
