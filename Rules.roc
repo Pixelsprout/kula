@@ -2,6 +2,7 @@ import World
 import Level
 import Ball
 import Pickup
+import Flash
 import View
 
 Rules := [].{
@@ -11,7 +12,7 @@ Rules := [].{
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
 	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), unloads : List(Str) }
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), flashes : List(Flash.Flash), unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
@@ -38,6 +39,9 @@ Rules := [].{
 	move_pickups : F32 -> (Model -> Model)
 	move_pickups = |dt| |model| { ..model, pickups: model.pickups.map(|pickup| Pickup.advance(pickup, dt)) }
 
+	fade_flashes : F32 -> (Model -> Model)
+	fade_flashes = |dt| |model| { ..model, flashes: Flash.advance(model.flashes, dt) }
+
 	# As in the original, every step tests each pickup against the ball centre
 	# while the player has control. So a pickup can happen at any point of a move.
 	collect : Model -> Model
@@ -46,7 +50,7 @@ Rules := [].{
 			centre = View.centre(model.ball)
 			taken = model.pickups.keep_if(|pickup| Pickup.touches(pickup, centre))
 			keys = taken.keep_if(|pickup| pickup.kind == Key).len()
-			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys }
+			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys, flashes: model.flashes.concat(taken.map(Flash.at_pickup)) }
 		} else {
 			model
 		}
@@ -88,7 +92,7 @@ start_on : World.Meshes, U64, World.Level -> Rules.Model
 start_on = |meshes, level_number, level| {
 	pickups = Pickup.from_level(level)
 	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, flashes: [], unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -122,6 +126,9 @@ expect {
 	model = Rules.collect(at(Rules.start(meshes, 1), first_key))
 	model.keys_left == 1 and model.pickups.map(|pickup| pickup.cell) == [second_key]
 }
+
+# A pickup starts a flash one cell above its face.
+expect Rules.collect(at(Rules.start(meshes, 1), first_key)).flashes == [{ pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0 }]
 
 # Standing on a collected key does not count it twice.
 expect Rules.collect(Rules.collect(at(Rules.start(meshes, 1), first_key))).keys_left == 1
