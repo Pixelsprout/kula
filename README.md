@@ -2,8 +2,8 @@
 
 A clone of Kula World (PS1, 1998) on the rocco engine. A ball rolls over a
 grid of blocks. Gravity turns when the ball rolls over an edge. Collect
-every key, then roll into the exit. Three levels follow one another, each
-in its own Theme.
+every key, then roll into the exit. The three levels are Hiro levels 1 to 3
+of the original. They follow one another in one Theme.
 
 `SPEC.md` holds the original's numbers and says which of them this clone
 copies.
@@ -252,11 +252,15 @@ Kula copies the original's level clock. See `SPEC.md`, Level clock.
 
 `Theme.roc` holds one Theme for each level:
 
-| Level | File | Theme |
-|---|---|---|
-| 1 | `levels/level1.txt` | `haze` |
-| 2 | `levels/level2.txt` | `inca` |
-| 3 | `levels/level3.txt` | `arctic` |
+| Level | File | Original | Theme |
+|---|---|---|---|
+| 1 | `levels/level1.txt` | Hiro level 1 | `haze` |
+| 2 | `levels/level2.txt` | Hiro level 2 | `haze` |
+| 3 | `levels/level3.txt` | Hiro level 3 | `haze` |
+
+The original has one look for each world, so all three levels use one
+Theme. No level uses the `inca` and `arctic` Themes yet. They wait for
+levels from other worlds.
 
 Each Theme is also a pack name. The pack of Theme `<theme>` holds
 `<theme>_face` and `sky/<theme>`. The face texture
@@ -273,6 +277,11 @@ sun light comes from.
 3. When the host calls `loaded` for that pack, Kula takes its mesh ids and
    starts the next level. The ball stays still for 1 s, the `Starting` phase.
 4. The next step sends Unload for the old Theme.
+
+If the next level has the same Theme, Kula sends no Load and no Unload,
+because the host ignores a Load for a pack that is already loaded. The
+step after the exit starts the next level with the Theme's ids, and the
+`Starting` pause follows. Levels 1 to 3 take this path.
 
 A fall restarts the level the ball is on, not level 1.
 
@@ -332,36 +341,43 @@ axes, so the level is not mirrored. The script moves the lowest block to 0
 on each axis. If the level's start time is not 99 s, the script writes a
 `time n` line.
 
+The script writes `coin` for a bronze coin. It stops on a gold or a silver
+coin. It writes `fruit` for any fruit, because the game shows the first
+fruit not yet collected, whatever fruit the level stores.
+
 `python3 -m unittest discover -s scripts` tests the script on a synthetic
 disc image.
 
 ### Example: level1
 
-`levels/level1.txt` is one column wide. It has two layers:
+`levels/level1.txt` is Hiro level 1. It has one layer, a ring of 4 × 7
+blocks round two holes:
 
 ```text
-E        .
-#        .
-#        .
-.        .
-#        .
-#        K
-#        #
-K        .
-#        .
-S        .
+####
+#..#
+#..#
+####
+#..#
+#..#
+####
+
+0 0 4 +y coin
+3 0 1 +y coin
+0 0 0 +y exit
+3 0 6 +y fruit
+3 0 3 +y key
+start 0 0 6 +y -z
 ```
 
-The left column is layer 0 and the right column is layer 1. In the file,
-layer 1 comes after layer 0 and a blank line. The route:
+The route that collects every item:
 
-1. Roll from `S` along `-z` over the first key.
-2. Climb the wall of layer 1 and roll onto its top.
-3. Collect the second key. Roll over the far edge onto the side of the
-   block.
-4. Climb back onto layer 0.
-5. Jump the gap.
-6. Roll on to the exit.
+1. Roll from the start along `-z` over the first coin to the middle row.
+2. Turn right and roll along the middle row to the key.
+3. Turn right and roll to the fruit.
+4. Turn about and roll along the right column, over the second coin, to
+   the far row.
+5. Turn left and roll to the exit.
 
 ## Meshes and skies
 
@@ -425,3 +441,7 @@ and commit its output:
 ```sh
 python3 assets/source/make_sounds.py
 ```
+
+## Credits
+
+Level layouts from Roll Away / Kula World (Game Design Sweden, 1998).

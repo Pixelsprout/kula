@@ -241,6 +241,9 @@ A table in Kula code maps each level to its Theme.
 | Fact | Original | Label | Clone |
 |---|---|---|---|
 | Level entries | An object block holds one object slot for each face, so a key, the exit or the spawn can sit on any face. The spawn face sets the ball's up and a start forward. The spawn rotation then turns the forward (`SetPlayerRotation`, `src/level_update2.c:1206`, called at `:386`) | Code | An entry puts a key, a coin, the exit or the start on any face of a block. A start entry names its forward. `scripts/convert_level.py` writes the forward of the turned spawn |
+| Levels | A world holds 15 levels. The level number is `curWorld * 15 + curLevel + 1` (`memcard2.c:92`). Hiro is the first world (`LEVEL_DIRS`, `loading.c:23-35`) | Code | Levels 1 to 3 are Hiro levels 1 to 3, converted from the player's own disc image. Kula ships the level text and no other disc data |
+| Look of a world | Each world has its own directory. A new world loads its TGI file, which holds the look, and its level PAK (`LEVEL_DIRS`, `loading.c:23-35`; `ReadDataFile` in `main.c:315-330`). So all levels of a world share one look | Code (load), Inferred (one look) | One Theme, `haze`, for levels 1 to 3. A level whose next level has the same Theme starts it with no Load |
+| Coin and fruit entries | A coin's variant sets its score: 750, 500 or 250 (`level_update3.c:228-240`). Hiro levels 1 to 3 hold only variant 2. Level init swaps any fruit object for the first fruit not yet collected (`level_update2.c:126-144`) | Code | The converter writes `coin` for variant 2 and stops on variants 0 and 1. It writes `fruit` for any of the five fruits |
 
 ## Items
 
