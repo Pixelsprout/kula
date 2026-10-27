@@ -2,21 +2,24 @@ import linalg.Quat
 import linalg.Vec3
 import World
 import Grid
+import Fruit
 
 # An item that the ball collects by touch. A new kind adds a Kind tag and a row in look.
 Pickup := [].{
-	Kind : [Key, Coin]
+	Kind : [Key, Coin, Fruit(Fruit.Kind)]
 
 	# spin, tilt and bob are phases in turns from 0 to 1, as the original keeps three angles for each item.
 	# id is the place among the level's pickups, so a pickup keeps it after a restart.
 	Pickup : { id : U64, cell : World.Cell, up : World.Cell, kind : Kind, spin : F32, tilt : F32, bob : F32 }
 
-	from_level : World.Level -> List(Pickup.Pickup)
-	from_level = |level| level.items
+	# Each fruit entry shows `fruit`, the level's fruit.
+	from_level : World.Level, Fruit.Kind -> List(Pickup.Pickup)
+	from_level = |level, fruit| level.items
 		.join_map(
 			|entry| match entry.item {
 				Key => [{ cell: entry.cell, up: entry.up, kind: Key }]
 				Coin => [{ cell: entry.cell, up: entry.up, kind: Coin }]
+				Fruit => [{ cell: entry.cell, up: entry.up, kind: Fruit(fruit) }]
 				Exit => []
 			},
 		)
@@ -80,6 +83,7 @@ look : Pickup.Kind -> Look
 look = |kind| match kind {
 	Key => { lift: 130.0, touch: 22500.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 1000 }
 	Coin => { lift: 150.0, touch: 25600.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 250 }
+	Fruit(_) => { lift: 130.0, touch: 32400.0, spin: 24.0, tilt: -80.0, tilt_size: 150.0, bob: -60.0, points: 2500 }
 }
 
 # The original adds 10000 for the ball to every item's collisionDistance.
@@ -179,7 +183,7 @@ expect {
 expect !Pickup.touches({ ..floor_key, bob: 0.25 }, { x: 0.0, y: 1.195, z: 0.0 })
 
 expect {
-	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 0 }, up: { x: 0, y: 1, z: 0 }, item: Exit }, { cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Key }, { cell: { x: 0, y: 1, z: 5 }, up: { x: 0, y: 1, z: 0 }, item: Key }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } } })
+	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 0 }, up: { x: 0, y: 1, z: 0 }, item: Exit }, { cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Key }, { cell: { x: 0, y: 1, z: 5 }, up: { x: 0, y: 1, z: 0 }, item: Key }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } } }, Apple)
 	pickups.map(|p| p.id) == [0, 1] and pickups.map(|p| p.cell.z) == [3, 5] and pickups.all(|p| p.kind == Key)
 }
 
@@ -188,4 +192,28 @@ expect {
 	on_wall = { ..key_on({ x: 0, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }), spin: 0.3 }
 	turned = Quat.rotate(y_axis, Pickup.rot(on_wall))
 	near(turned.x, -1.0) and near(turned.y, 0.0) and near(turned.z, 0.0)
+}
+
+expect {
+	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Fruit }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } } }, Pumpkin)
+	pickups.map(|p| p.kind) == [Fruit(Pumpkin)]
+}
+
+floor_fruit : Pickup.Pickup
+floor_fruit = { ..floor_key, kind: Fruit(Apple) }
+
+# A fruit's reach is 206 units, 0.40 cell. Its centre sits at a key's height, and every fruit gives 2500.
+expect near(Pickup.reach_squared(Fruit(Apple)), 42400.0 / 512.0 / 512.0) and near(Pickup.centre(floor_fruit).y, Pickup.centre(floor_key).y)
+expect [Apple, Watermelon, Pumpkin, Banana, Strawberry].all(|kind| Pickup.points(Fruit(kind)) == 2500)
+
+# A fruit spins 24/4096 of a turn forward each frame, its tilt 80/4096 back and its bob 60/4096 back.
+expect {
+	moved = Pickup.advance({ ..floor_fruit, spin: 0.5, tilt: 0.5, bob: 0.5 }, 0.02)
+	near(moved.spin, 0.5 + 24.0 / 4096.0) and near(moved.tilt, 0.5 - 80.0 / 4096.0) and near(moved.bob, 0.5 - 60.0 / 4096.0)
+}
+
+# At a quarter of its tilt phase, a fruit on the floor leans 150/4096 of a turn off the face normal.
+expect {
+	leaning = Quat.rotate(y_axis, Pickup.rot({ ..floor_fruit, tilt: 0.25 }))
+	near(leaning.y, (tau * 150.0 / 4096.0).cos()) and near(Quat.rotate(y_axis, Pickup.rot(floor_fruit)).y, 1.0)
 }

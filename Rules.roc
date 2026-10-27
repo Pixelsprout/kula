@@ -5,6 +5,7 @@ import Pickup
 import Flash
 import View
 import Score
+import Fruit
 
 Rules := [].{
 	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
@@ -12,20 +13,20 @@ Rules := [].{
 
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
-	# bounce and chime are the Sound ids of the landing bounce and the coin chime, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, chime : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, flashes : List(Flash.Flash), unloads : List(Str) }
+	# bounce, chime and jingle are the Sound ids of the landing bounce, the coin chime and the fruit jingle, 0 until the kula pack loads.
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, chime : U32, jingle : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, fruits : Fruit.Fruits, flashes : List(Flash.Flash), unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
-	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
+	start = |meshes, level_number| start_with(meshes, level_number, Fruit.none)
 
 	restart : Model -> Model
-	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce, chime: model.chime, score: Score.die(model.score, model.level_number) }
+	restart = |model| { ..start_with(model.meshes, model.level_number, Fruit.die(model.fruits)), bounce: model.bounce, chime: model.chime, jingle: model.jingle, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, chime: model.chime, score: model.score, phase: Starting(start_pause) }
+	next_level = |model| { ..start_with(model.meshes, model.level_number + 1, model.fruits), bounce: model.bounce, chime: model.chime, jingle: model.jingle, score: model.score, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
@@ -52,7 +53,14 @@ Rules := [].{
 			taken = model.pickups.keep_if(|pickup| Pickup.touches(pickup, centre))
 			keys = taken.keep_if(|pickup| pickup.kind == Key).len()
 			points = taken.fold(0, |sum, pickup| sum + Pickup.points(pickup.kind))
-			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys, score: Score.add(model.score, points), flashes: model.flashes.concat(taken.map(Flash.at_pickup)) }
+			fruits = taken.fold(
+				model.fruits,
+				|so_far, pickup| match pickup.kind {
+					Fruit(kind) => Fruit.collect(so_far, kind)
+					_ => so_far
+				},
+			)
+			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys, score: Score.add(model.score, points), fruits, flashes: model.flashes.concat(taken.map(Flash.at_pickup)) }
 		} else {
 			model
 		}
@@ -66,6 +74,7 @@ Rules := [].{
 			{
 				..model,
 				score: Score.bank(model.score),
+				fruits: Fruit.bank(model.fruits),
 				phase: if model.level_number < Level.count {
 					Cleared
 				} else {
@@ -91,11 +100,15 @@ parse_or_crash = |text| match Level.parse(text) {
 	Err(err) => crash "The level does not parse: ${Str.inspect(err)}"
 }
 
-start_on : World.Meshes, U64, World.Level -> Rules.Model
-start_on = |meshes, level_number, level| {
-	pickups = Pickup.from_level(level)
+# The level shows the first fruit not in fruits.
+start_with : World.Meshes, U64, Fruit.Fruits -> Rules.Model
+start_with = |meshes, level_number, fruits| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)), fruits)
+
+start_on : World.Meshes, U64, World.Level, Fruit.Fruits -> Rules.Model
+start_on = |meshes, level_number, level, fruits| {
+	pickups = Pickup.from_level(level, Fruit.next(fruits))
 	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, chime: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, flashes: [], unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, chime: 0, jingle: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, fruits, flashes: [], unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -103,7 +116,7 @@ has_item : World.Level, World.Pose, World.Item -> Bool
 has_item = |level, pose, item| level.items.any(|entry| entry.cell == pose.cell and entry.up == pose.up and entry.item == item)
 
 meshes : World.Meshes
-meshes = { cube: 1, face: 5, ball: 4, coin: 6, sky: 1 }
+meshes = { cube: 1, sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 1 }
 
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
@@ -131,7 +144,7 @@ expect {
 }
 
 # A pickup starts a flash one cell above its face.
-expect Rules.collect(at(Rules.start(meshes, 1), first_key)).flashes == [{ pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0 }]
+expect Rules.collect(at(Rules.start(meshes, 1), first_key)).flashes == [{ pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0, kind: Key }]
 
 # Standing on a collected key does not count it twice.
 expect Rules.collect(Rules.collect(at(Rules.start(meshes, 1), first_key))).keys_left == 1
@@ -197,7 +210,7 @@ expect {
 
 # The cell (0, 1, 0) holds a key on the +y face of block (0, 0, 0) and an item on the -x face of block (1, 1, 0).
 two_faces : Str -> Rules.Model
-two_faces = |item| start_on(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y key\n1 1 0 -x ${item}\nstart 1 1 0 +y -z\n"))
+two_faces = |item| start_on(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y key\n1 1 0 -x ${item}\nstart 1 1 0 +y -z\n"), Fruit.none)
 
 on_face : Rules.Model, World.Cell -> Rules.Model
 on_face = |model, up| { ..model, ball: Ball.start({ cell: cell(0, 1, 0), up, forward: cell(0, 0, -1) }) }
@@ -223,7 +236,7 @@ expect {
 
 # A forward jump from z 2 to z 0, with a key on the wall beside z 1 or on the floor of z 1.
 jump_past : Str -> Rules.Model
-jump_past = |key| start_on(meshes, 1, parse_or_crash("#.\n#.\n#.\n\n..\n.#\n..\n\n${key}\nstart 0 0 2 +y -z\n"))
+jump_past = |key| start_on(meshes, 1, parse_or_crash("#.\n#.\n#.\n\n..\n.#\n..\n\n${key}\nstart 0 0 2 +y -z\n"), Fruit.none)
 
 jump : Rules.Model -> Rules.Model
 jump = |model| { ..model, ball: Ball.act(model.level.blocks, model.ball, Jump({ up_held: True })) }
@@ -293,4 +306,48 @@ expect Rules.fall(off_the_level({ ..Rules.start(meshes, 2), score: { level: 1000
 expect {
 	first_try = Rules.collect(at(Rules.start(meshes, 1), first_key))
 	Rules.fall(off_the_level(first_try)).score == Score.zero
+}
+
+# The exit sits on the +y face of block (0, 0, 0) and a fruit on the -x face of block (1, 1, 0). The level has no keys.
+fruit_level : Fruit.Fruits -> Rules.Model
+fruit_level = |fruits| start_on(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y exit\n1 1 0 -x fruit\nstart 1 1 0 +y -z\n"), fruits)
+
+on_fruit : Rules.Model -> Rules.Model
+on_fruit = |model| on_face(model, cell(-1, 0, 0))
+
+# A fresh game shows an apple. The apple adds 2500 to the level score and joins the fruit set.
+expect {
+	picked = Rules.collect(on_fruit(fruit_level(Fruit.none)))
+	fruit_level(Fruit.none).pickups.map(|pickup| pickup.kind) == [Fruit(Apple)]
+		and picked.pickups == []
+			and picked.score == { level: 2500, total: 0 }
+				and picked.fruits == { now: [Apple], saved: [] }
+					and picked.flashes.map(|flash| flash.kind) == [Fruit(Apple)]
+}
+
+# Each level shows the first fruit the set lacks: an apple, then a watermelon, then a pumpkin.
+expect {
+	shown = |kinds| fruit_level(Fruit.bank(kinds.fold(Fruit.none, Fruit.collect))).pickups.map(|pickup| pickup.kind)
+	shown([Apple]) == [Fruit(Watermelon)] and shown([Apple, Watermelon]) == [Fruit(Pumpkin)] and shown([Watermelon]) == [Fruit(Apple)]
+}
+
+# The exit keeps the fruit for the next level. A later fall does not take it back.
+expect {
+	picked = Rules.collect(on_fruit(fruit_level(Fruit.none)))
+	cleared = Rules.exit(on_face(picked, cell(0, 1, 0)))
+	next = Rules.next_level(cleared)
+	cleared.phase == Cleared and cleared.fruits == { now: [Apple], saved: [Apple] } and next.fruits == cleared.fruits and Rules.fall(off_the_level(next)).fruits == cleared.fruits
+}
+
+# A fall loses the fruit of the try, as it loses the level score.
+expect {
+	picked = Rules.collect(on_fruit(fruit_level(Fruit.none)))
+	fell = Rules.fall(off_the_level(picked))
+	fell.fruits == Fruit.none and fell.score == Score.zero
+}
+
+# A fall keeps the fruit that an earlier exit saved and loses the one collected since.
+expect {
+	picked = Rules.collect(on_fruit(fruit_level(Fruit.bank(Fruit.collect(Fruit.none, Apple)))))
+	picked.fruits.now == [Apple, Watermelon] and Rules.fall(off_the_level(picked)).fruits == { now: [Apple], saved: [Apple] }
 }

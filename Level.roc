@@ -133,6 +133,7 @@ entry = |line| {
 			item = match item_name {
 				"key" => Ok(Key)
 				"coin" => Ok(Coin)
+				"fruit" => Ok(Fruit)
 				"exit" => Ok(Exit)
 				_ => Err(Bad)
 			}?
@@ -256,6 +257,7 @@ expect Level.parse("##\n\nstart 0 0 0 +y +y\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n0 0 0 +w key\nstart 0 0 0 +y -z\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n0 0 0 +y gem\n") == Err(BadEntry(3))
 expect Level.parse("S#\n\n1 0 0 +z coin\n").map_ok(|l| l.items) == Ok([{ cell: cell(1, 0, 1), up: cell(0, 0, 1), item: Coin }])
+expect Level.parse("S#\n\n1 0 0 -x fruit\n").map_ok(|l| l.items) == Ok([{ cell: cell(0, 0, 0), up: cell(-1, 0, 0), item: Fruit }])
 expect Level.parse("##\n\n0 0 x +y key\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n0 0 0 +y key extra\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n5 0 0 +y key\nstart 0 0 0 +y -z\n") == Err(NoBlock(3))
