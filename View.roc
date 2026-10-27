@@ -29,12 +29,12 @@ View := [].{
 	theme_meshes : World.Meshes, Manifest, Str, Str -> World.Meshes
 	theme_meshes = |meshes, manifest, face, sky| { ..meshes, face: Mesh.resolve(manifest, face), sky: Mesh.resolve(manifest, sky) }
 
-	# The idle bob squashes the ball along up, not along a spinning model axis.
-	# The centre drops as the ball squashes, so its bottom stays on the floor.
+	# The idle bob and the landing squish squash the ball along up, not along a
+	# spinning model axis. The centre drops as the ball squashes, so its bottom stays on the floor.
 	ball_draw : Ball.Ball, U32, Rgb -> Vocabulary.Draw
 	ball_draw = |ball, mesh, tint| {
 		up = Ball.interpolated(ball).up
-		s = bob_amount * (2.0 * pi * ball.bob).sin()
+		s = bob_amount * (2.0 * pi * ball.bob).sin() + Ball.squash(ball)
 		pos = Vec3.sub(Ball.centre(ball), Vec3.scale(up, 2.0 * s * Ball.radius))
 		scale = Vec3.scale({ x: 1.0 + s, y: 1.0 - 2.0 * s, z: 1.0 + s }, 2.0 * Ball.radius)
 		scale_rot = Quat.mul(Quat.conjugate(ball.rot), Quat.between({ x: 0.0, y: 1.0, z: 0.0 }, up))
@@ -328,4 +328,13 @@ expect {
 	on_ceiling = { cell: cell(0, -1, 0), up: cell(0, -1, 0), forward: cell(0, 0, -1) }
 	draw = View.ball_draw({ ..Ball.start(on_ceiling), bob: 0.25 }, 2, white)
 	(draw.pos.y + draw.scale.y / 2.0 + 0.5).abs() < 0.0001
+}
+
+# At its peak, 3 frames after the contact, the landing squish adds 748/4096 to the bob. The bottom stays on the floor.
+expect {
+	landed = Ball.advance(Ball.act(floor, Ball.start(on_origin), Jump({ up_held: True })), 0.54)
+	draw = View.ball_draw({ ..Ball.advance(landed, 0.06), bob: 0.25 }, 2, white)
+	s = (200.0 + 748.0) / 4096.0
+	d = 2.0 * Ball.radius
+	near(draw.scale, { x: d * (1.0 + s), y: d * (1.0 - 2.0 * s), z: d * (1.0 + s) }) and (draw.pos.y - draw.scale.y / 2.0 - 0.5).abs() < 0.0001
 }
