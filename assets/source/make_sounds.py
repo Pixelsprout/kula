@@ -109,9 +109,49 @@ def jingle():
     return samples
 
 
+# A bright metal zing for a key: a tone that glides up an octave in 50 ms,
+# with an inharmonic ring above it that shimmers as it dies away.
+def key():
+    length = 0.4
+    samples = []
+    phase = 0.0
+    for i in range(int(length * RATE)):
+        t = i / RATE
+        freq = 1760.0 - 880.0 * math.exp(-t / 0.018)
+        phase += TAU * freq / RATE
+        attack = min(t / 0.002, 1.0)
+        shimmer = 1.0 + 0.25 * math.sin(TAU * 18.0 * t)
+        tone = math.sin(phase) + 0.35 * shimmer * math.exp(-t / 0.06) * math.sin(2.41 * phase)
+        samples.append(0.4 * attack * tail(t, length, 0.05) * math.exp(-t / 0.12) * tone)
+    return samples
+
+
+# The last key opens the exit: the key's zing, then a held major chord
+# that swells in and shimmers, a longer sound than any pickup.
+def last_key():
+    length = 1.2
+    chord = [1046.5, 1318.5, 1568.0, 2093.0]
+    zing = key()
+    samples = []
+    for i in range(int(length * RATE)):
+        t = i / RATE
+        since = t - 0.08
+        sound = 0.0
+        if since >= 0.0:
+            swell = min(since / 0.06, 1.0) * math.exp(-since / 0.45)
+            shimmer = 1.0 + 0.3 * math.sin(TAU * 7.0 * since)
+            sound = 0.12 * swell * shimmer * sum(math.sin(TAU * f * since) for f in chord)
+        if i < len(zing):
+            sound += zing[i]
+        samples.append(tail(t, length, 0.1) * sound)
+    return samples
+
+
 folder = os.path.join(ASSETS, "sound")
 os.makedirs(folder, exist_ok=True)
 write(os.path.join(folder, "bounce.wav"), bounce())
 write(os.path.join(folder, "chime.wav"), chime())
 write(os.path.join(folder, "tick.wav"), tick())
 write(os.path.join(folder, "jingle.wav"), jingle())
+write(os.path.join(folder, "key.wav"), key())
+write(os.path.join(folder, "last_key.wav"), last_key())

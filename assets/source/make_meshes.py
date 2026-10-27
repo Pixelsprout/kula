@@ -231,6 +231,88 @@ def make_coin():
     export(new_object("coin", mesh), "coin.glb")
 
 
+# The original's key model is GGI data, so Kula builds its own to the
+# original's size: 0.24 wide, 0.06 thick along Blender Y and 0.57 tall, with
+# the origin at the item centre. In the game, most of this gold draws near
+# the original's main key colour (141, 121, 42).
+KEY_COLOUR = (0.55, 0.4, 0.05, 1.0)
+KEY_ROUGHNESS = 0.35
+KEY_METALLIC = 0.2
+KEY_BOTTOM = -0.225
+KEY_TOP = 0.345
+KEY_HALF_WIDTH = 0.12
+KEY_HALF_THICKNESS = 0.03
+# A hexagon point on ±Y makes the shaft as thick as the bow. The shaft's top
+# ends inside the bow.
+KEY_SHAFT_TOP = 0.16
+KEY_SHAFT_CHAMFER = 0.012
+KEY_TIP = 0.5
+# (x0, x1, half thickness, z0, z1)
+KEY_TOOTH = (-0.09, -0.02, 0.02, KEY_BOTTOM + 0.012, KEY_BOTTOM + 0.09)
+# The bow is a diamond in the XZ plane. Each side has a flat table, this
+# share of the diamond's size, with four sloped facets round it.
+KEY_BOW_BOTTOM = 0.105
+KEY_BOW_TABLE = 0.45
+
+
+def hexagon(bm, radius, z):
+    angles = [math.pi / 2.0 + math.pi / 3.0 * i for i in range(6)]
+    return [bm.verts.new((radius * math.cos(a), radius * math.sin(a), z)) for a in angles]
+
+
+def key_shaft(bm):
+    radius = KEY_HALF_THICKNESS
+    rings = [
+        hexagon(bm, radius * KEY_TIP, KEY_BOTTOM),
+        hexagon(bm, radius, KEY_BOTTOM + KEY_SHAFT_CHAMFER),
+        hexagon(bm, radius, KEY_SHAFT_TOP),
+    ]
+    bm.faces.new(rings[0])
+    bm.faces.new(rings[-1])
+    for a, b in zip(rings, rings[1:]):
+        for i in range(6):
+            j = (i + 1) % 6
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+
+
+def key_tooth(bm):
+    x0, x1, half, z0, z1 = KEY_TOOTH
+    corners = [bm.verts.new((x, y, z)) for x in (x0, x1) for y in (-half, half) for z in (z0, z1)]
+    for quad in [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]:
+        bm.faces.new([corners[i] for i in quad])
+
+
+def key_bow(bm):
+    middle = (KEY_BOW_BOTTOM + KEY_TOP) / 2.0
+    outline = [(0.0, KEY_TOP), (KEY_HALF_WIDTH, middle), (0.0, KEY_BOW_BOTTOM), (-KEY_HALF_WIDTH, middle)]
+    rim = [bm.verts.new((x, 0.0, z)) for x, z in outline]
+    for y in (-KEY_HALF_THICKNESS, KEY_HALF_THICKNESS):
+        table = [bm.verts.new((x * KEY_BOW_TABLE, y, middle + (z - middle) * KEY_BOW_TABLE)) for x, z in outline]
+        bm.faces.new(table)
+        for i in range(4):
+            j = (i + 1) % 4
+            bm.faces.new((rim[i], rim[j], table[j], table[i]))
+
+
+# A key standing on its face, bow on top and the tooth on the -X side at the
+# bottom. The parts overlap where they join. Sharp faces let the sun light
+# each facet on its own.
+def make_key():
+    clear_scene()
+    bm = bmesh.new()
+    key_shaft(bm)
+    key_tooth(bm)
+    key_bow(bm)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:
+        f.smooth = False
+    mesh = bpy.data.meshes.new("key")
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(material("key_gold", KEY_COLOUR, KEY_ROUGHNESS, KEY_METALLIC))
+    export(new_object("key", mesh), "key.glb")
+
+
 # The original's fruit models are GGI data, so the shapes and colours are
 # Kula's own. Each mesh's origin is the item centre, 0.25 cell above the
 # face. The bob drops it to 0.23 cell and the tilt leans it 13 degrees, so
@@ -478,6 +560,7 @@ def make_pumpkin():
 BUILDERS = {name + "_face": (lambda theme=(name, texel, noise): make_face(*theme)) for name, texel, noise in THEMES}
 BUILDERS["ball"] = make_ball
 BUILDERS["coin"] = make_coin
+BUILDERS["key"] = make_key
 BUILDERS["apple"] = make_apple
 BUILDERS["watermelon"] = make_watermelon
 BUILDERS["pumpkin"] = make_pumpkin
