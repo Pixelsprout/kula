@@ -173,11 +173,13 @@ back and the exit closes. The fall also costs points. See Score.
 
 ## Keys and the exit
 
-- A key sits on one face of a block. It spins and bobs above the face.
+- A key is a gold key that stands on one face of a block. It spins and bobs
+  above the face.
 - The ball collects a key when the ball centre comes within 0.35 cell of the
   key centre, as in the original. The test runs every step in `Playing`, so
   a key collects in the middle of a roll or a jump. A collected key
-  disappears.
+  disappears and plays the key sound. The last key of the level plays the
+  last-key sound in its place.
 - A forward jump passes too high over a key on the floor of the cell it
   jumps over, so that key stays. See `SPEC.md`, Items.
 - The exit is a block. It is open when the ball has collected every key.
@@ -269,8 +271,8 @@ sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
    The `kula` pack holds `ball`, `coin`, `apple`, `watermelon`, `pumpkin`,
-   `sound/bounce`, `sound/chime`, `sound/tick` and `sound/jingle`, which
-   every level uses.
+   `key`, `sound/bounce`, `sound/chime`, `sound/tick`, `sound/jingle`,
+   `sound/key` and `sound/last_key`, which every level uses.
    It never unloads.
 2. When the ball clears a level before the last, Kula sends Load for the
    next level's Theme.
@@ -382,14 +384,15 @@ The route that collects every item:
 ## Meshes and skies
 
 The blocks draw as faces, not as whole cubes. The camera can then sit inside
-a block, as in the original, and still see the ball. Keys are primitive
-cubes. A banana and a strawberry are tinted primitive spheres, because
-Kula's levels never show them.
+a block, as in the original, and still see the ball. A banana and a
+strawberry are tinted primitive spheres, because Kula's levels never show
+them.
 
 | File | What it is |
 |---|---|
 | `assets/meshes/<theme>_face.glb` | A 1 × 1 quad facing +y, one-sided, with the Theme's texture |
 | `assets/meshes/ball.glb` | A sphere of diameter 1 with eight white and red wedges |
+| `assets/meshes/key.glb` | A gold key 0.24 wide, 0.06 thick and 0.57 tall: a hexagonal shaft, one tooth at the bottom and a faceted diamond bow on top. It stands up along +y, with its faces along ±z |
 | `assets/meshes/coin.glb` | A bronze disc 0.4 wide, with a raised rim and a bevelled edge. Metallic 0.4, so the flat face stays bronze with no environment map. It stands on its edge, with its faces along ±z |
 | `assets/meshes/apple.glb` | A red apple 0.39 wide with a stem and a leaf |
 | `assets/meshes/watermelon.glb` | A striped watermelon 0.48 long, lying along ±z |
@@ -422,7 +425,8 @@ transporters yet; a landing after one must stay silent too.
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
 lands. `Ball.landed` decides the landing. It returns one `Sound.play` with
 the chime's Sound id for each coin the step collects, and one with the
-jingle's Sound id for each fruit.
+jingle's Sound id for each fruit. Each key plays the key sound. The key that
+leaves no keys plays the last-key sound alone, as in the original.
 
 In the last 20 s of the level clock, `step` returns a `Play` of the tick
 with a gain that rises as the time runs out. See Level clock.
@@ -433,6 +437,8 @@ with a gain that rises as the time runs out. See Level clock.
 | `assets/sound/chime.wav` | The coin chime, 0.35 s: two bright notes a fifth apart |
 | `assets/sound/tick.wav` | The clock tick, 0.06 s of 16-bit mono at 48 kHz |
 | `assets/sound/jingle.wav` | The fruit jingle, 0.6 s: four soft notes up a major chord |
+| `assets/sound/key.wav` | The key sound, 0.4 s: a bright zing that glides up an octave |
+| `assets/sound/last_key.wav` | The last-key sound, 1.2 s: the key's zing, then a held major chord |
 
 `assets/source/make_sounds.py` synthesizes them with the Python standard
 library. It does not copy the original's sounds. Run it from this directory
