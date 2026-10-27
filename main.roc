@@ -236,9 +236,9 @@ manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "haze_face", "sky/haze", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }).model
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "hiro_face", "sky/hiro", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }).model
 	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id)])
-	loaded(loaded(booted, "kula", kula), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
+	loaded(loaded(booted, "kula", kula), "hiro", manifest([("hiro_face", 5), ("sky/hiro", 1)]))
 }
 
 bounce_id : U32
@@ -278,7 +278,7 @@ lights_in = |scene| scene.nodes.join_map(
 	},
 )
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }), Load({ pack: "hiro", assets: ["hiro_face", "sky/hiro"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, sky: 0 }
 expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id }
 expect started.meshes == { cube: 1, sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 1 }
@@ -565,7 +565,7 @@ expect {
 	}
 }
 
-# Levels 1 and 2 share the haze Theme. The step after the exit starts level 2
+# Levels 1 and 2 share the hiro Theme. The step after the exit starts level 2
 # with the Theme's ids and sends no Load and no Unload.
 expect {
 	open = { ..at_pose(column, before_exit), keys_left: 0 }

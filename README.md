@@ -254,13 +254,20 @@ Kula copies the original's level clock. See `SPEC.md`, Level clock.
 
 | Level | File | Original | Theme |
 |---|---|---|---|
-| 1 | `levels/level1.txt` | Hiro level 1 | `haze` |
-| 2 | `levels/level2.txt` | Hiro level 2 | `haze` |
-| 3 | `levels/level3.txt` | Hiro level 3 | `haze` |
+| 1 | `levels/level1.txt` | Hiro level 1 | `hiro` |
+| 2 | `levels/level2.txt` | Hiro level 2 | `hiro` |
+| 3 | `levels/level3.txt` | Hiro level 3 | `hiro` |
 
 The original has one look for each world, so all three levels use one
-Theme. No level uses the `inca` and `arctic` Themes yet. They wait for
+Theme. No level uses the `haze`, `inca` and `arctic` Themes yet. They wait for
 levels from other worlds.
+
+The `hiro` Theme copies the look of the original's Hiro world. Its sky has
+a white zenith, blue sky with soft clouds, pyramids on the horizon and
+orange sand below. Its face is sandstone with a carved border. The sun
+comes from +z, so faces that look along +z are bright and warm, and faces
+that look along -z are dark. The colours are numbers from the original's
+`HIRO.TGI`; Kula's scripts make every pixel. See SPEC.md, Look.
 
 Each Theme is also a pack name. The pack of Theme `<theme>` holds
 `<theme>_face` and `sky/<theme>`. The face texture
@@ -397,8 +404,9 @@ Kula's levels never show them.
 | `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky |
 
 `assets/source/make_meshes.py` builds the meshes and their textures.
-`assets/source/make_skies.py` renders the skies. Each Theme in a script
-uses the same name and sun direction as in `Theme.roc`. Run both with
+`assets/source/make_skies.py` makes the skies. It paints the `hiro` sky
+texel by texel and renders the others with Blender's sky texture. Each
+Theme in a script uses the same name and sun direction as in `Theme.roc`. Run both with
 Blender from this directory:
 
 ```sh
@@ -406,7 +414,8 @@ Blender from this directory:
 /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_skies.py
 ```
 
-Names after `--` build only those meshes, for example `-- coin`. Each
+Names after `--` build only those meshes or skies, for example `-- coin`
+or `-- hiro`. A second run of `make_skies.py` writes the same files. Each
 fruit mesh has one material and one base colour texture, as the engine
 allows. Its origin is the fruit's centre. Commit the scripts and their
 outputs. The build does not run Blender.
