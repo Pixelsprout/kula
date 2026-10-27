@@ -4,6 +4,7 @@ import Ball
 import Pickup
 import View
 import Score
+import Clock
 
 Rules := [].{
 	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
@@ -11,20 +12,20 @@ Rules := [].{
 
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
-	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, unloads : List(Str) }
+	# bounce and tick are Sound ids, 0 until the kula pack loads. clock holds the steps left.
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, tick : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, clock : U64, unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
 
 	restart : Model -> Model
-	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce, score: Score.die(model.score, model.level_number) }
+	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce, tick: model.tick, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, score: model.score, phase: Starting(start_pause) }
+	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, tick: model.tick, score: model.score, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
@@ -72,6 +73,18 @@ Rules := [].{
 			model
 		}
 
+	# As in the original, the clock runs only while the player has control. At 0
+	# the level ends as a death, the same as a fall.
+	run_clock : Model -> Model
+	run_clock = |model|
+		if model.phase != Playing {
+			model
+		} else if model.clock <= 1 {
+			restart(model)
+		} else {
+			{ ..model, clock: model.clock - 1 }
+		}
+
 	fall : Model -> Model
 	# A restart in Cleared would leave the next Theme's pack loaded with no level to take it.
 	fall = |model| if model.phase != Cleared and Ball.fell_off(model.ball) {
@@ -91,7 +104,7 @@ start_on : World.Meshes, U64, World.Level -> Rules.Model
 start_on = |meshes, level_number, level| {
 	pickups = Pickup.from_level(level)
 	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, tick: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, clock: Clock.start(level.time), unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -263,4 +276,34 @@ expect Rules.fall(off_the_level({ ..Rules.start(meshes, 2), score: { level: 1000
 expect {
 	first_try = Rules.collect(at(Rules.start(meshes, 1), first_key))
 	Rules.fall(off_the_level(first_try)).score == Score.zero
+}
+
+expect Rules.start(meshes, 1).clock == Clock.start(Clock.default_seconds)
+expect start_on(meshes, 1, parse_or_crash("S\n\ntime 45\n")).clock == Clock.start(45)
+
+# The clock counts one step a step, only in Playing.
+expect Rules.run_clock(Rules.start(meshes, 1)).clock == Clock.start(Clock.default_seconds) - 1
+expect {
+	model = Rules.start(meshes, 1)
+	[Cleared, Starting(0.5), Won].all(|phase| Rules.run_clock({ ..model, phase }) == { ..model, phase })
+}
+
+# At 0 the level restarts with a full clock and the death penalty, as a fall does.
+expect {
+	model = { ..Rules.start(meshes, 2), score: { level: 1000, total: 5000 }, clock: 1 }
+	timed_out = Rules.run_clock(model)
+	timed_out == { ..Rules.start(meshes, 2), score: { level: 0, total: 3900 } } and timed_out == Rules.fall(off_the_level(model))
+}
+
+expect {
+	model = { ..Rules.start(meshes, 1), clock: 2 }
+	Rules.run_clock(model).clock == 1 and Rules.run_clock(Rules.run_clock(model)).clock == Clock.start(Clock.default_seconds)
+}
+
+# The sound ids survive a restart and a new level.
+expect {
+	model = { ..Rules.start(meshes, 1), bounce: 3, tick: 4, clock: 1 }
+	restarted = Rules.run_clock(model)
+	next = Rules.next_level({ ..model, phase: Cleared })
+	restarted.tick == 4 and restarted.bounce == 3 and next.tick == 4 and next.clock == Clock.start(Clock.default_seconds)
 }

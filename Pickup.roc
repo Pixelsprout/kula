@@ -172,7 +172,7 @@ expect {
 expect !Pickup.touches({ ..floor_key, bob: 0.25 }, { x: 0.0, y: 1.195, z: 0.0 })
 
 expect {
-	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 0 }, up: { x: 0, y: 1, z: 0 }, item: Exit }, { cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Key }, { cell: { x: 0, y: 1, z: 5 }, up: { x: 0, y: 1, z: 0 }, item: Key }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } } })
+	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 0 }, up: { x: 0, y: 1, z: 0 }, item: Exit }, { cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Key }, { cell: { x: 0, y: 1, z: 5 }, up: { x: 0, y: 1, z: 0 }, item: Key }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } }, time: 99 })
 	pickups.map(|p| p.id) == [0, 1] and pickups.map(|p| p.cell.z) == [3, 5] and pickups.all(|p| p.kind == Key)
 }
 
