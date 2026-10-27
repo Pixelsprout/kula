@@ -163,6 +163,19 @@ Ball := [].{
 		Squashing(seconds) => landing_squish(seconds)
 	}
 
+	# The pose whose face is under the ball centre. As in the original, a roll
+	# reaches its new cell when the centre passes the half-cell line.
+	standing : Ball.Ball -> Try(World.Pose, [InAir])
+	standing = |ball| match ball.motion {
+		Still => Ok(ball.pose)
+		Rolling({ from, t }) => if t < 0.5 {
+			Ok(from)
+		} else {
+			Ok(ball.pose)
+		}
+		_ => Err(InAir)
+	}
+
 	# A roll or a jump starts only from Still with no turn running. A floor roll,
 	# or an edge roll before the edge, can also start a jump. A turn can start
 	# during a jump in place.
@@ -1386,4 +1399,10 @@ expect {
 	bounced = Ball.advance(Ball.act(wall_ahead, still, forward_jump), 0.19)
 	rolled = Ball.advance(Ball.act(floor_ahead, still, Roll), 0.26)
 	bounced.squish == Squashing(0.0) and rolled.squish == Settled
+}
+
+# A roll stands on its new cell from half way. A jump stands on no cell.
+expect {
+	rolling = Ball.act(floor_ahead, still, Roll)
+	Ball.standing(still) == Ok(on_origin) and Ball.standing(Ball.advance(rolling, 0.12)) == Ok(on_origin) and Ball.standing(Ball.advance(rolling, 0.13)) == Ok(rolling.pose) and Ball.standing(Ball.act(floor_ahead, still, forward_jump)) == Err(InAir)
 }

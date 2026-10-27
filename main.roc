@@ -24,6 +24,7 @@ import Level
 import Clock
 import Fruit
 import Sounds
+import Ending
 
 Model : Rules.Model
 
@@ -53,10 +54,10 @@ loaded = |model, pack, manifest| {
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
 		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), sounds: Sounds.resolve(manifest) }
-	} else if model.phase == Cleared and pack == next_theme.pack {
+	} else if Rules.cleared(model.phase) and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
-	} else if model.phase != Cleared and pack == current.pack {
+	} else if !Rules.cleared(model.phase) and pack == current.pack {
 		{ ..model, meshes: View.theme_meshes(model.meshes, manifest, current.face, current.sky) }
 	} else {
 		model
@@ -66,14 +67,14 @@ loaded = |model, pack, manifest| {
 step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
-	stages = [start_same_theme, Rules.count_down(dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
+	stages = [start_same_theme, Rules.count_down(dt), Rules.run_ending(controls.jump, dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
 	} else {
 		[]
 	}
-	load = if model.phase != Cleared and after.phase == Cleared and !keeps_theme(after.level_number) {
+	load = if !Rules.cleared(model.phase) and Rules.cleared(after.phase) and !keeps_theme(after.level_number) {
 		[load_theme(after.level_number + 1)]
 	} else {
 		[]
@@ -90,7 +91,7 @@ keeps_theme = |level_number| Theme.of_level(level_number + 1).pack == Theme.of_l
 # In the step after such a level is Cleared, the next level starts with the Theme's ids.
 start_same_theme : Model -> Model
 start_same_theme = |model|
-	if model.phase == Cleared and keeps_theme(model.level_number) {
+	if Rules.cleared(model.phase) and keeps_theme(model.level_number) {
 		Rules.next_level(model)
 	} else {
 		model
@@ -151,9 +152,10 @@ read_input = |controls| |model| match (model.phase, action(controls)) {
 	_ => model
 }
 
+# As in the original, held Up rolls on only in Playing, so a roll onto the exit stops at the cell centre.
 move_ball : Controls, F32 -> (Model -> Model)
 move_ball = |controls, dt| |model|
-	if controls.forward {
+	if controls.forward and model.phase == Playing {
 		{ ..model, ball: Ball.advance_up_held(model.level.blocks, model.ball, dt) }
 	} else {
 		{ ..model, ball: Ball.advance(model.ball, dt) }
@@ -184,7 +186,11 @@ view = |model| {
 	} else {
 		closed_exit_tint
 	}
-	camera = View.camera(model.ball)
+	ending = Rules.ending(model.phase)
+	camera = match ending {
+		Ok(sequence) => View.orbit(model.level.blocks, sequence.seconds)
+		Err(NotEnded) => View.camera(model.ball)
+	}
 	# Ids come before the near-plane filter, so a face keeps its id while others drop out.
 	blocks = View.faces(model.level.blocks)
 		.map_with_index(|face, i| { face, id: 1 + i.to_u64() })
@@ -205,9 +211,13 @@ view = |model| {
 	} else {
 		playing_ball_tint
 	}
-	ball = View.ball_draw(model.ball, model.meshes.ball, ball_tint)
+	# As in the original, the ball hides once the level ends.
+	ball = match ending {
+		Ok(_) => []
+		Err(NotEnded) => [View.ball_draw(model.ball, model.meshes.ball, ball_tint)]
+	}
 	lights = theme.lights.concat(Flash.lights(model.flashes, theme.lights)).map(|light| Light(light))
-	draws = blocks.concat(pickups).append(ball).map(|draw| Draw(draw))
+	draws = blocks.concat(pickups).concat(ball).map(|draw| Draw(draw))
 	{ ..Scene.empty, camera, nodes: lights.concat(draws), sky: model.meshes.sky, ui: Hud.ui(model) }
 }
 
@@ -595,11 +605,11 @@ expect bounce_steps(bounces_after(blocked(".\n.\n.\n\n.\n.\n#\n\n"), space)) == 
 # A jump in place bounces once, as it lands 0.54 s in.
 expect bounce_steps(bounces_after(blocked(""), space)) == [55]
 
-# With no control, in Cleared or Won, a landing is silent, as in the original.
+# With no control, after the level end or in Won, a landing is silent, as in the original.
 expect {
 	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
 	jumping = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1).model
-	[Cleared, Won].all(|phase| step({ ..jumping, phase }, idle, QueryResults.empty, 0.6).commands == [])
+	[Ending(Ending.start(0)), Cleared(Ending.start(0)), Won].all(|phase| step({ ..jumping, phase }, idle, QueryResults.empty, 0.6).commands == [])
 }
 
 # Held Up rolls on through the cell with no step at rest.
@@ -619,26 +629,89 @@ expect {
 	}
 }
 
-# Levels 1 and 2 share the hiro Theme. The step after the exit starts level 2
+exit_cell : World.Cell
+exit_cell = { x: 0, y: 1, z: 0 }
+
+# A roll onto the open exit with Up held. The level plays on for 0.1 s after
+# the ball centre passes into the exit cell, then ends with the banked score.
+# Up no longer rolls the ball, so it stops on the exit and does not roll over the edge.
+expect {
+	open = { ..at_pose(column, before_exit), keys_left: 0, score: { level: 2000, total: 0 } }
+	rolling = step(open, up_held, QueryResults.empty, 0.12)
+	reached = step(rolling.model, up_held, QueryResults.empty, 0.02)
+	waiting = step(reached.model, up_held, QueryResults.empty, 0.04)
+	ended = step(waiting.model, up_held, QueryResults.empty, 0.07)
+	stopped = step(ended.model, up_held, QueryResults.empty, 0.1).model
+	rolling.model.phase == Playing
+		and reached.model.phase == Exiting(0.1)
+			and match waiting.model.phase {
+				Exiting(seconds) => (seconds - 0.06).abs() < 0.0001
+				_ => False
+			}
+				and ended.model.phase == Ending({ seconds: 0.07, banked: 2000, skipped: False })
+					and ended.model.score == { level: 0, total: 2000 }
+						and [rolling, reached, waiting, ended].all(|s| s.commands == [])
+							and stopped.ball.motion == Still
+								and stopped.ball.pose.cell == exit_cell
+}
+
+# After the level end, the ball hides and the camera turns about the level.
+# The HUD gives way to the level end panel.
+expect {
+	ended = { ..at_pose(column, { ..before_exit, cell: exit_cell }), keys_left: 0, phase: Ending({ ..Ending.start(0), seconds: 0.5 }) }
+	scene = view(ended)
+	exiting = view({ ..ended, phase: Exiting(0.05) })
+	draws_in(scene).keep_if(|d| d.mesh == ended.meshes.ball) == []
+		and scene.camera == View.orbit(column.level.blocks, 0.5)
+			and scene.ui != exiting.ui
+				and exiting.camera == View.camera(ended.ball)
+					and exiting.ui == Hud.ui({ ..ended, phase: Playing })
+						and draws_in(exiting).keep_if(|d| d.mesh == ended.meshes.ball).len() == 1
+}
+
+# A pickup flash fades on through the level end.
+expect {
+	ended = { ..column, flashes: [{ pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0, kind: Key }], phase: Ending(Ending.start(0)) }
+	point_lights(view(ended)).len() == 1 and point_lights(view(step(ended, idle, QueryResults.empty, 0.7).model)) == []
+}
+
+press : Vocabulary.Input
+press = { ..idle, pressed: [Key.code(Space)] }
+
+# The first press finishes the banner and the count. The second goes on.
+# Levels 1 and 2 share the hiro Theme, so the step after it starts level 2
 # with the Theme's ids and sends no Load and no Unload.
 expect {
-	open = { ..at_pose(column, before_exit), keys_left: 0 }
-	finished = step(open, up_held, QueryResults.empty, 0.1)
-	next = step(finished.model, idle, QueryResults.empty, 0.1)
-	finished.commands == []
-		and finished.model.phase == Cleared
-			and next.commands == []
-				and next.model.level_number == 2
-					and next.model.phase == Starting(Rules.start_pause - 0.1)
-						and next.model.meshes == started.meshes
-							and next.model.sounds == started.sounds
-								and step(next.model, idle, QueryResults.empty, 0.1).commands == []
+	ended = { ..at_pose(column, { ..before_exit, cell: exit_cell }), keys_left: 0, score: { level: 0, total: 2000 }, phase: Ending(Ending.start(2000)) }
+	waited = step(ended, idle, QueryResults.empty, 0.3)
+	skipped = step(waited.model, press, QueryResults.empty, 0.01)
+	cleared = step(skipped.model, press, QueryResults.empty, 0.01)
+	next = step(cleared.model, idle, QueryResults.empty, 0.1)
+	waited.model.phase == Ending({ seconds: 0.3, banked: 2000, skipped: False })
+		and skipped.model.phase == Ending({ seconds: 0.31, banked: 2000, skipped: True })
+			and cleared.model.phase == Cleared({ seconds: 0.32, banked: 2000, skipped: True })
+				and cleared.model.level_number == 1
+					and [waited, skipped, cleared, next].all(|s| s.commands == [])
+						and next.model.level_number == 2
+							and next.model.phase == Starting(Rules.start_pause - 0.1)
+								and next.model.score == { level: 0, total: 2000 }
+									and next.model.meshes == started.meshes
+										and next.model.sounds == started.sounds
+											and step(next.model, idle, QueryResults.empty, 0.1).commands == []
+}
+
+# A pad's South is the press too. Up, Left and Right do not go on.
+expect {
+	finished = { ..column, phase: Ending({ ..Ending.start(0), seconds: 2.0 }) }
+	others = [up_held, { ..idle, pressed: [Key.code(Left)] }, { ..idle, pressed: [Key.code(Right)] }]
+	step(finished, with_pads([pad_pressing(South)]), QueryResults.empty, 0.01).model.phase == Cleared({ ..Ending.start(0), seconds: 2.01 })
+		and others.all(|input| step(finished, input, QueryResults.empty, 0.01).model.phase == Ending({ ..Ending.start(0), seconds: 2.01 }))
 }
 
 # The first step of a new level plays no chime for the coins left on the old
 # one, even when the new level has no pickups with their ids.
 expect {
-	cleared = { ..at_pose(started, before_exit), keys_left: 0, phase: Cleared, pickups: started.pickups.map(|pickup| { ..pickup, id: pickup.id + 50 }) }
+	cleared = { ..at_pose(started, before_exit), keys_left: 0, phase: Cleared(Ending.start(0)), pickups: started.pickups.map(|pickup| { ..pickup, id: pickup.id + 50 }) }
 	next = step(cleared, idle, QueryResults.empty, 0.01)
 	next.model.level_number == 2 and next.commands == []
 }
@@ -656,7 +729,7 @@ expect {
 
 expect lights_in(view(on_level(2))) == Theme.of_level(2).lights
 
-Move : [Roll, Left, Right, Leap]
+Move : [Roll, Left, Right, Leap, Press]
 
 # Each move starts with a short step that presses its keys. A long idle step then finishes it.
 play : Model, List(Move) -> Model
@@ -668,6 +741,7 @@ play = |model, moves| moves.fold(
 			Left => { ..idle, pressed: [Key.code(Left)] }
 			Right => { ..idle, pressed: [Key.code(Right)] }
 			Leap => { ..idle, held: [Key.code(Up)], pressed: [Key.code(Space)] }
+			Press => press
 		}
 		step(step(m, keys, QueryResults.empty, 0.01).model, idle, QueryResults.empty, 1.0).model
 	},
@@ -678,31 +752,50 @@ on_level = |number| Rules.start(started.meshes, number)
 
 # Each route collects the key, every coin and the fruit, then takes the exit.
 # The exit banks 1000 for the key, 250 for each coin and 2500 for the fruit.
+# Each level waits after its exit until two presses: the first skips the count.
 expect {
-	played = play(on_level(1), [Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Right, Roll, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll])
-	played.level_number == 2 and played.score.total == 1000 + 2 * 250 + 2500
+	route = [Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Right, Roll, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll]
+	waiting = play(on_level(1), route.append(Press))
+	played = play(waiting, [Press])
+	waiting.level_number == 1 and played.level_number == 2 and played.score.total == 1000 + 2 * 250 + 2500
 }
 
 # The route jumps each gap between the rings.
 expect {
-	played = play(on_level(2), [Roll, Roll, Roll, Leap, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Left, Leap, Left, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Left, Leap])
+	played = play(on_level(2), [Roll, Roll, Roll, Leap, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Left, Leap, Left, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Left, Leap, Press, Press])
 	played.level_number == 3 and played.score.total == 1000 + 6 * 250 + 2500
 }
 
 # The route climbs a pillar onto the side of the bridge, rolls along it past
 # the key and climbs down the other pillar.
 expect {
-	played = play(on_level(3), [Roll, Roll, Roll, Right, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Right, Roll, Roll, Roll])
+	played = play(on_level(3), [Roll, Roll, Roll, Right, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Right, Roll, Roll, Roll, Press, Press])
 	played.phase == Won and played.score.total == 1000 + 10 * 250 + 2500
 }
 
 before_last_exit : World.Pose
 before_last_exit = { cell: { x: 7, y: 1, z: 5 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: 1 } }
 
+# The last level ends with the same sequence, then Won. Won draws the ball in
+# gold on the exit with the play camera and brings the HUD back.
 expect {
 	open = { ..at_pose(on_level(3), before_last_exit), keys_left: 0 }
-	finished = step(open, up_held, QueryResults.empty, 0.1)
-	finished.model.phase == Won and finished.commands == []
+	rolling = step(open, up_held, QueryResults.empty, 0.1).model
+	reached = step(rolling, idle, QueryResults.empty, 0.1).model
+	ended = step(reached, idle, QueryResults.empty, 0.1).model
+	skipped = step(ended, press, QueryResults.empty, 0.01)
+	won = step(skipped.model, press, QueryResults.empty, 0.01)
+	still_won = step(won.model, press, QueryResults.empty, 1.0)
+	scene = view(won.model)
+	rolling.phase == Playing
+		and reached.phase == Exiting(0.1)
+			and ended.phase == Ending({ seconds: 0.1, banked: 0, skipped: False })
+				and won.model.phase == Won
+					and [skipped, won, still_won].all(|s| s.commands == [])
+						and still_won.model.phase == Won
+							and draws_in(scene).keep_if(|d| d.mesh == won.model.meshes.ball).map(|d| d.tint) == [won_ball_tint]
+								and scene.camera == View.camera(won.model.ball)
+									and scene.ui == Hud.ui({ ..won.model, phase: Playing })
 }
 
 # Three blocks in a row with a coin on the middle one. The ball starts on the last, facing it.
@@ -743,11 +836,19 @@ expect {
 	first.commands == [] and second.commands == [Play({ sound: tick_id, gain: 510.0 / 7000.0, pitch: 1.0, at: Here })]
 }
 
-# The clock stops at the exit, so the tick stops too.
+# The clock runs until the level ends, then stops, so the tick stops too.
 expect {
 	open = { ..at_pose(started, before_exit), keys_left: 0, clock: Clock.start(5) + 1 }
-	finished = step(open, up_held, QueryResults.empty, 0.1).model
-	finished.phase == Cleared and finished.clock == Clock.start(5) and step(finished, idle, QueryResults.empty, 0.1).commands == []
+	reached = step(open, up_held, QueryResults.empty, 0.2).model
+	waiting = step(reached, idle, QueryResults.empty, 0.04)
+	ended = step(waiting.model, idle, QueryResults.empty, 0.1).model
+	reached.phase == Exiting(0.1)
+		and reached.clock == Clock.start(5)
+			and waiting.model.clock == Clock.start(5) - 1
+				and waiting.commands.len() == 1
+					and ended.clock == Clock.start(5) - 1
+						and step(ended, idle, QueryResults.empty, 2.0).commands == []
+							and step(ended, idle, QueryResults.empty, 2.0).model.clock == ended.clock
 }
 
 # At 0 the level restarts with a full clock and no tick. The rest of that step plays on the restarted level.

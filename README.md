@@ -107,7 +107,7 @@ current one ends.
 | Face | One side of a block that touches an empty cell. Only faces draw. |
 | Commit | A move sets the new pose when it starts. The ball then moves to that pose over the time of the move. |
 | Open end | A block with no block to its left or right, as the ball sees it. Only an open end lets the ball roll over the edge. |
-| Phase | `Playing`, `Cleared`, `Starting` or `Won`. `Cleared` waits for the next Theme to load. In `Starting`, the ball waits before the next level plays. |
+| Phase | `Playing`, `Exiting`, `Ending`, `Cleared`, `Starting` or `Won`. In `Exiting`, the ball is on the open exit and the level ends soon. `Ending` shows the level end until a press. `Cleared` waits for the next Theme to load. In `Starting`, the ball waits before the next level plays. |
 | Theme | The look of one level: a pack of a textured face and a sky, a sun and its lights. |
 
 ## Moves
@@ -189,15 +189,39 @@ back and the exit closes. The fall also costs points. See Score.
   jumps over, so that key stays. See `SPEC.md`, Items.
 - The exit is a block. It is open when the ball has collected every key.
   An open exit draws brighter than a closed one.
-- When the ball moves onto the face of the open exit of level 1 or 2, the
-  phase changes to `Cleared`. The next level starts. See Levels and Themes.
-- When the ball moves onto the face of the open exit of level 3, the phase
-  changes to `Won`. The ball finishes its move and stops. The ball changes
+- The ball reaches the open exit when its centre passes into the exit's
+  cell, half way through the roll, or when it lands on the exit. See Level
+  end.
+- After the level end of level 1 or 2, a press starts the next level. See
+  Levels and Themes.
+- After the level end of level 3, a press changes the phase to `Won`. The
+  ball shows again on the exit, and the HUD comes back. The ball changes
   colour.
 - In `Won`, every input except Escape does nothing.
 - A closed exit does nothing. The ball can roll over it.
 - A panel at the bottom left shows the keys collected out of the level's
-  total, such as `Keys 1 / 2`. It shows in every phase.
+  total, such as `Keys 1 / 2`. It hides with the rest of the HUD in `Ending`
+  and `Cleared`.
+
+## Level end
+
+Kula copies the original's level end. See `SPEC.md`, Level end.
+
+1. The ball reaches the open exit. The phase changes to `Exiting`. Input
+   does nothing and Up no longer rolls the ball, so a roll stops at the
+   exit's centre.
+2. After a roll, the level plays on for 0.1 s: the clock runs and the ball
+   collects. After a landing, the level ends in the next step.
+3. The level ends. The phase changes to `Ending`, and the level score goes
+   to the total score.
+4. The ball and the HUD hide. The camera turns about the level and swings
+   in and out.
+5. `WELL DONE` fades in at the top centre over 1.7 s. Below the middle,
+   `Level n` and `Score n` count up by 5000 a second, from 0 and from the
+   old total.
+6. When both finish, `Press Space` shows. Press Space or the pad's South
+   to go on. A press before they finish only finishes them.
+7. The next level starts. After level 3, the phase changes to `Won`.
 
 ## Coins
 
@@ -232,8 +256,8 @@ Kula copies the original's two scores. See `SPEC.md`, Score.
 
 - The level score holds the points of the current try at the level. A key
   adds 1000, a coin 250 and a fruit 2500.
-- The exit adds the level score to the total score and sets the level score
-  to 0.
+- The level end adds the level score to the total score and sets the level
+  score to 0.
 - A fall takes the level score and a penalty off the total score. The
   penalty is 50 times the level number, at most 5000.
 - The total score does not go below 0. Kula has no game over and no lives.
@@ -245,8 +269,8 @@ Kula copies the original's two scores. See `SPEC.md`, Score.
 Kula copies the original's level clock. See `SPEC.md`, Level clock.
 
 - Each level starts with the time of its `time n` line, or 99 s without one.
-- The clock counts whole steps down. It runs only in `Playing`, so it stops
-  at the exit and in the `Starting` pause.
+- The clock counts whole steps down. It runs only in `Playing` and
+  `Exiting`, so it stops when the level ends and in the `Starting` pause.
 - At 0 the level restarts, the same as a fall, and the fall's penalty comes
   off the total score.
 - A restart sets the clock back to the start time.
@@ -286,15 +310,15 @@ sun light comes from.
    `key`, `sound/bounce`, `sound/chime`, `sound/tick`, `sound/jingle`,
    `sound/key` and `sound/last_key`, which every level uses.
    It never unloads.
-2. When the ball clears a level before the last, Kula sends Load for the
-   next level's Theme.
+2. When the press after the level end of a level before the last changes
+   the phase to `Cleared`, Kula sends Load for the next level's Theme.
 3. When the host calls `loaded` for that pack, Kula takes its mesh ids and
    starts the next level. The ball stays still for 1 s, the `Starting` phase.
 4. The next step sends Unload for the old Theme.
 
 If the next level has the same Theme, Kula sends no Load and no Unload,
 because the host ignores a Load for a pack that is already loaded. The
-step after the exit starts the next level with the Theme's ids, and the
+step after the press starts the next level with the Theme's ids, and the
 `Starting` pause follows. Levels 1 to 3 take this path.
 
 A fall restarts the level the ball is on, not level 1.
@@ -434,9 +458,9 @@ The ball bounces with a short thud when it lands on a block: from a
 forward jump, a jump in place, a fall or a bounce. It thuds too when a jump
 hits a wall or a ceiling, so a blocked jump thuds twice. A roll and a fall
 off the level make no sound. As in the original, a landing is silent when
-the player has no control, so a landing in `Cleared` or `Won` makes no
-sound, but a hit always thuds. Kula has no transporters yet; a landing after
-one must stay silent too.
+the player has no control, so a landing after the level end or in `Won`
+makes no sound, but a hit always thuds. Kula has no transporters yet; a
+landing after one must stay silent too.
 
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
 lands and in the step it hits. `Ball.landed` and `Ball.hit` decide them. It
