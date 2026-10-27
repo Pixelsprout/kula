@@ -202,12 +202,29 @@ back and the exit closes. The fall also costs points. See Score.
   when the coin is near the top of its bob. See `SPEC.md`, Items.
 - A fall brings back every coin of the level.
 
+## Fruit
+
+Kula copies the original's five fruits: apple, watermelon, pumpkin, banana
+and strawberry. See `SPEC.md`, Items.
+
+- A level entry `fruit` shows the first fruit not yet collected, in that
+  order. A new game shows an apple on the first level with a fruit, then a
+  watermelon, then a pumpkin.
+- A fruit spins slowly, tilts and bobs. The ball collects it when the ball
+  centre comes within 0.40 cell of the fruit centre. The fruit adds 2500
+  to the level score and plays a jingle.
+- The exit keeps the fruit collected. A fall loses the fruit collected
+  since the last exit.
+- A panel at the bottom right shows the fruit collected out of five, such
+  as `Fruit 1 / 5`.
+- Kula has no bonus level, so five fruits do nothing more.
+
 ## Score
 
 Kula copies the original's two scores. See `SPEC.md`, Score.
 
 - The level score holds the points of the current try at the level. A key
-  adds 1000 and a coin 250.
+  adds 1000, a coin 250 and a fruit 2500.
 - The exit adds the level score to the total score and sets the level score
   to 0.
 - A fall takes the level score and a penalty off the total score. The
@@ -247,8 +264,9 @@ carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
-   The `kula` pack holds `ball`, `coin`, `sound/bounce`, `sound/chime` and
-   `sound/tick`, which every level uses.
+   The `kula` pack holds `ball`, `coin`, `apple`, `watermelon`, `pumpkin`,
+   `sound/bounce`, `sound/chime`, `sound/tick` and `sound/jingle`, which
+   every level uses.
    It never unloads.
 2. When the ball clears a level before the last, Kula sends Load for the
    next level's Theme.
@@ -281,7 +299,7 @@ face of a block. Entries come after the last layer, one on each line:
 
 | Entry | Meaning |
 |---|---|
-| `x y z face item` | Item `key`, `coin` or `exit` on face `face` of the block at `x y z` |
+| `x y z face item` | Item `key`, `coin`, `fruit` or `exit` on face `face` of the block at `x y z` |
 | `start x y z face forward` | The ball starts on face `face` of the block at `x y z`, facing `forward` |
 | `time n` | The level clock starts at `n` seconds, 1 or more. At most one line. Without it, the clock starts at 99 s |
 
@@ -349,13 +367,17 @@ layer 1 comes after layer 0 and a blank line. The route:
 
 The blocks draw as faces, not as whole cubes. The camera can then sit inside
 a block, as in the original, and still see the ball. Keys are primitive
-cubes.
+cubes. A banana and a strawberry are tinted primitive spheres, because
+Kula's levels never show them.
 
 | File | What it is |
 |---|---|
 | `assets/meshes/<theme>_face.glb` | A 1 × 1 quad facing +y, one-sided, with the Theme's texture |
 | `assets/meshes/ball.glb` | A sphere of diameter 1 with eight white and red wedges |
 | `assets/meshes/coin.glb` | A bronze metal disc 0.4 wide, with a raised rim and a bevelled edge. It stands on its edge, with its faces along ±z |
+| `assets/meshes/apple.glb` | A red apple 0.39 wide with a stem and a leaf |
+| `assets/meshes/watermelon.glb` | A striped watermelon 0.48 long, lying along ±z |
+| `assets/meshes/pumpkin.glb` | A ribbed orange pumpkin 0.44 wide with a stem |
 | `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky |
 
 `assets/source/make_meshes.py` builds the meshes and their textures.
@@ -368,9 +390,10 @@ Blender from this directory:
 /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_skies.py
 ```
 
-Names after `--` build only those meshes, for example
-`-- coin`. Commit the scripts and their outputs. The build does not run
-Blender.
+Names after `--` build only those meshes, for example `-- coin`. Each
+fruit mesh has one material and one base colour texture, as the engine
+allows. Its origin is the fruit's centre. Commit the scripts and their
+outputs. The build does not run Blender.
 
 ## Sound
 
@@ -382,7 +405,8 @@ transporters yet; a landing after one must stay silent too.
 
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
 lands. `Ball.landed` decides the landing. It returns one `Sound.play` with
-the chime's Sound id for each coin the step collects.
+the chime's Sound id for each coin the step collects, and one with the
+jingle's Sound id for each fruit.
 
 In the last 20 s of the level clock, `step` returns a `Play` of the tick
 with a gain that rises as the time runs out. See Level clock.
@@ -392,6 +416,7 @@ with a gain that rises as the time runs out. See Level clock.
 | `assets/sound/bounce.wav` | The bounce, 0.2 s of 16-bit mono at 48 kHz |
 | `assets/sound/chime.wav` | The coin chime, 0.35 s: two bright notes a fifth apart |
 | `assets/sound/tick.wav` | The clock tick, 0.06 s of 16-bit mono at 48 kHz |
+| `assets/sound/jingle.wav` | The fruit jingle, 0.6 s: four soft notes up a major chord |
 
 `assets/source/make_sounds.py` synthesizes them with the Python standard
 library. It does not copy the original's sounds. Run it from this directory

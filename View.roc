@@ -10,14 +10,21 @@ import Ball
 View := [].{
 	# The kula pack's meshes. Each Theme names its own assets.
 	assets : List(Str)
-	assets = ["ball", "coin"]
+	assets = ["ball", "coin", "apple", "watermelon", "pumpkin"]
 
-	# Keys stay primitive cubes until a key mesh exists. face, ball and coin are 0, the fallback, and sky is 0, no sky, until loaded.
+	# Keys stay primitive cubes until a key mesh exists, and a banana and a strawberry primitive spheres. The loaded meshes are 0, the fallback, and sky is 0, no sky, until loaded.
 	primitive_meshes : World.Meshes
-	primitive_meshes = { cube: Mesh.primitive(Cube), face: 0, ball: 0, coin: 0, sky: 0 }
+	primitive_meshes = { cube: Mesh.primitive(Cube), sphere: Mesh.primitive(Sphere), face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, sky: 0 }
 
 	kula_meshes : World.Meshes, Manifest -> World.Meshes
-	kula_meshes = |meshes, manifest| { ..meshes, ball: Mesh.resolve(manifest, "ball"), coin: Mesh.resolve(manifest, "coin") }
+	kula_meshes = |meshes, manifest| {
+		..meshes,
+		ball: Mesh.resolve(manifest, "ball"),
+		coin: Mesh.resolve(manifest, "coin"),
+		apple: Mesh.resolve(manifest, "apple"),
+		watermelon: Mesh.resolve(manifest, "watermelon"),
+		pumpkin: Mesh.resolve(manifest, "pumpkin"),
+	}
 
 	theme_meshes : World.Meshes, Manifest, Str, Str -> World.Meshes
 	theme_meshes = |meshes, manifest, face, sky| { ..meshes, face: Mesh.resolve(manifest, face), sky: Mesh.resolve(manifest, sky) }

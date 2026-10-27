@@ -22,6 +22,7 @@ import Pickup
 import Flash
 import Level
 import Clock
+import Fruit
 
 Model : Rules.Model
 
@@ -31,7 +32,7 @@ launch = |_config| { ..Launch.default, step_hz: Clock.step_hz }
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat([bounce_sound, chime_sound, tick_sound]) }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat([bounce_sound, chime_sound, tick_sound, jingle_sound]) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
@@ -48,6 +49,9 @@ chime_sound = "sound/chime"
 tick_sound : Str
 tick_sound = "sound/tick"
 
+jingle_sound : Str
+jingle_sound = "sound/jingle"
+
 load_theme : U64 -> Command
 load_theme = |level_number| {
 	theme = Theme.of_level(level_number)
@@ -60,7 +64,7 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound), chime: Sound.resolve(manifest, chime_sound), tick: Sound.resolve(manifest, tick_sound) }
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound), chime: Sound.resolve(manifest, chime_sound), tick: Sound.resolve(manifest, tick_sound), jingle: Sound.resolve(manifest, jingle_sound) }
 	} else if model.phase == Cleared and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
@@ -87,15 +91,22 @@ step = |model, input, _results, dt| {
 		[]
 	}
 	unloads = model.unloads.map(|pack| Unload(pack))
-	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)).concat(chimes(model, after)).concat(tick(model, after)) }
+	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)).concat(pickup_sounds(model, after)).concat(tick(model, after)) }
 }
 
-# One chime for each coin the step collected. In a step, only a pickup takes
-# an item out of the pickups: a restart puts them all back.
-chimes : Model, Model -> List(Command)
-chimes = |before, after| before.pickups
-	.keep_if(|pickup| pickup.kind == Coin and !after.pickups.any(|left| left.id == pickup.id))
-	.map(|_| Sound.play(after.chime))
+# One chime for each coin and one jingle for each fruit the step collected.
+# In a step, only a pickup takes an item out of the pickups: a restart puts
+# them all back.
+pickup_sounds : Model, Model -> List(Command)
+pickup_sounds = |before, after| before.pickups
+	.keep_if(|pickup| !after.pickups.any(|left| left.id == pickup.id))
+	.join_map(
+		|pickup| match pickup.kind {
+			Coin => [Sound.play(after.chime)]
+			Fruit(_) => [Sound.play(after.jingle)]
+			Key => []
+		},
+	)
 
 # As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
 bounce : Model, Model -> List(Command)
@@ -223,15 +234,30 @@ won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 key_size : F32
 key_size = 0.3
 
-# coin.glb carries its own size and colour.
+# coin.glb and the fruit meshes carry their own size and colour.
 mesh_colour : Rgb
 mesh_colour = { r: 1.0, g: 1.0, b: 1.0 }
+
+# Kula's levels never show a banana or a strawberry, so they have no mesh.
+spare_fruit_size : F32
+spare_fruit_size = 0.35
+
+banana_tint : Rgb
+banana_tint = { r: 0.95, g: 0.8, b: 0.15 }
+
+strawberry_tint : Rgb
+strawberry_tint = { r: 0.85, g: 0.05, b: 0.1 }
 
 pickup_draw : World.Meshes, Pickup.Pickup -> Vocabulary.Draw
 pickup_draw = |meshes, pickup| {
 	look = match pickup.kind {
 		Key => { mesh: meshes.cube, size: key_size, tint: key_tint }
 		Coin => { mesh: meshes.coin, size: 1.0, tint: mesh_colour }
+		Fruit(Apple) => { mesh: meshes.apple, size: 1.0, tint: mesh_colour }
+		Fruit(Watermelon) => { mesh: meshes.watermelon, size: 1.0, tint: mesh_colour }
+		Fruit(Pumpkin) => { mesh: meshes.pumpkin, size: 1.0, tint: mesh_colour }
+		Fruit(Banana) => { mesh: meshes.sphere, size: spare_fruit_size, tint: banana_tint }
+		Fruit(Strawberry) => { mesh: meshes.sphere, size: spare_fruit_size, tint: strawberry_tint }
 	}
 	{ ..Draw.default, id: pickup_ids + pickup.id, mesh: look.mesh, pos: Pickup.centre(pickup), rot: Pickup.rot(pickup), scale: Vec3.scale(Vec3.one, look.size), tint: look.tint }
 }
@@ -242,8 +268,9 @@ manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "haze_face", "sky/haze", "sound/bounce", "sound/chime", "sound/tick"] }).model
-	loaded(loaded(booted, "kula", manifest([("ball", 4), ("coin", 6), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id)])), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "haze_face", "sky/haze", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }).model
+	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id)])
+	loaded(loaded(booted, "kula", kula), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
 }
 
 bounce_id : U32
@@ -254,6 +281,9 @@ chime_id = 65538
 
 tick_id : U32
 tick_id = 65539
+
+jingle_id : U32
+jingle_id = 65540
 
 idle : Vocabulary.Input
 idle = Input.empty
@@ -274,11 +304,12 @@ lights_in = |scene| scene.nodes.join_map(
 	},
 )
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "sound/bounce", "sound/chime", "sound/tick"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
-expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, coin: 0, sky: 0 }
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, sky: 0 }
 expect init({ seed: 0, args: [], assets: [] }).model.bounce == 0 and started.bounce == bounce_id
 expect init({ seed: 0, args: [], assets: [] }).model.chime == 0 and started.chime == chime_id
-expect started.meshes == { cube: 1, face: 5, ball: 4, coin: 6, sky: 1 }
+expect init({ seed: 0, args: [], assets: [] }).model.jingle == 0 and started.jingle == jingle_id
+expect started.meshes == { cube: 1, sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
@@ -403,9 +434,9 @@ expect {
 	faded = step(peak, idle, QueryResults.empty, 0.56).model
 	flash_pos = { x: 0.0, y: 1.5, z: 7.0 }
 	picked.keys_left == 1
-		and point_lights(view(picked)) == [Light.point(flash_pos, Flash.colour(0.0), 2.0)]
-			and point_lights(view(peak)) == [Light.point(flash_pos, Flash.colour(0.1), 2.0)]
-				and Flash.colour(0.1).b > Flash.colour(0.1).r
+		and point_lights(view(picked)) == [Light.point(flash_pos, Flash.colour(Key, 0.0), 2.0)]
+			and point_lights(view(peak)) == [Light.point(flash_pos, Flash.colour(Key, 0.1), 2.0)]
+				and Flash.colour(Key, 0.1).b > Flash.colour(Key, 0.1).r
 					and point_lights(view(faded)) == []
 						and lights_in(view(faded)) == Theme.of_level(1).lights
 }
@@ -561,13 +592,14 @@ expect {
 	after = step(switched, idle, QueryResults.empty, 0.1)
 	finished.commands == [Load({ pack: "inca", assets: ["inca_face", "sky/inca"] })]
 		and finished.model.phase == Cleared
-			and switched.meshes == { cube: 1, face: 7, ball: 4, coin: 6, sky: 2 }
+			and switched.meshes == { cube: 1, sphere: 2, face: 7, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 2 }
 				and switched.bounce == bounce_id
 					and switched.chime == chime_id
-						and switched.level_number == 2
-							and switched.phase == Starting(Rules.start_pause)
-								and after.commands == [Unload("haze")]
-									and step(after.model, idle, QueryResults.empty, 0.1).commands == []
+						and switched.jingle == jingle_id
+							and switched.level_number == 2
+								and switched.phase == Starting(Rules.start_pause)
+									and after.commands == [Unload("haze")]
+										and step(after.model, idle, QueryResults.empty, 0.1).commands == []
 }
 
 # A Cleared level sends its Load once.
@@ -630,7 +662,7 @@ expect {
 coin_run : Model
 coin_run = {
 	level = Level.parse("#\n#\n#\n\n0 0 1 +y coin\nstart 0 0 2 +y -z\n") ?? started.level
-	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level), keys_left: 0 }
+	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level, Apple), keys_left: 0 }
 }
 
 # A coin draws coin.glb unscaled, bobbing 140 to 180 units above its face.
@@ -676,4 +708,36 @@ expect {
 expect {
 	last_step = step({ ..started, clock: 1 }, up_held, QueryResults.empty, 0.01)
 	last_step.model == started and last_step.commands == []
+}
+
+# The coin run with a fruit in place of the coin.
+fruit_run : Fruit.Fruits -> Model
+fruit_run = |fruits| {
+	level = Level.parse("#\n#\n#\n\n0 0 1 +y fruit\nstart 0 0 2 +y -z\n") ?? started.level
+	{ ..coin_run, level, pickups: Pickup.from_level(level, Fruit.next(fruits)), fruits }
+}
+
+# Each fruit draws its own mesh unscaled. Its centre bobs 120 to 160 units above its face.
+expect {
+	fruit_mesh = |fruits| draws_in(view(fruit_run(fruits))).keep_if(|d| d.id == pickup_ids)
+	apple = fruit_mesh(Fruit.none)
+	watermelon = fruit_mesh(Fruit.collect(Fruit.none, Apple))
+	pumpkin = fruit_mesh(Fruit.collect(Fruit.collect(Fruit.none, Apple), Watermelon))
+	match (apple, watermelon, pumpkin) {
+		([a], [w], [p]) => a.mesh == started.meshes.apple and w.mesh == started.meshes.watermelon and p.mesh == started.meshes.pumpkin and a.scale == Vec3.one and a.pos.y - 0.5 >= 120.0 / 512.0 and a.pos.y - 0.5 <= 160.0 / 512.0
+		_ => False
+	}
+}
+
+# A roll onto the apple collects it, plays the jingle once, adds 2500 to the level score and lights a fruit flash.
+expect {
+	rolling = step(fruit_run(Fruit.none), up_held, QueryResults.empty, 0.01)
+	run = List.repeat(0.01, 60).fold(
+		{ model: rolling.model, sounds: rolling.commands },
+		|so_far, dt| {
+			next = step(so_far.model, idle, QueryResults.empty, dt)
+			{ model: next.model, sounds: so_far.sounds.concat(next.commands) }
+		},
+	)
+	run.sounds == [Sound.play(jingle_id)] and run.model.pickups == [] and run.model.score.level == 2500 and run.model.fruits.now == [Apple] and run.model.flashes.all(|flash| flash.kind == Fruit(Apple))
 }

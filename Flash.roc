@@ -6,22 +6,22 @@ import Pickup
 
 # The light that marks a pickup, as the original's light effect does.
 Flash := [].{
-	# age is the seconds since the pickup. A list of flashes runs oldest first.
-	Flash : { pos : Vec3.Vec3, age : F32 }
+	# age is the seconds since the pickup. kind is the item collected, which picks the colours. A list of flashes runs oldest first.
+	Flash : { pos : Vec3.Vec3, age : F32, kind : Pickup.Kind }
 
 	at_pickup : Pickup.Pickup -> Flash.Flash
-	at_pickup = |pickup| { pos: Vec3.add(Grid.to_vec3(pickup.cell), Vec3.scale(Grid.to_vec3(pickup.up), height - 0.5)), age: 0.0 }
+	at_pickup = |pickup| { pos: Vec3.add(Grid.to_vec3(pickup.cell), Vec3.scale(Grid.to_vec3(pickup.up), height - 0.5)), age: 0.0, kind: pickup.kind }
 
 	# A flash ends when its light has faded to black.
 	advance : List(Flash.Flash), F32 -> List(Flash.Flash)
-	advance = |flashes, dt| flashes.map(|flash| { ..flash, age: flash.age + dt }).keep_if(|flash| flash.age < seconds)
+	advance = |flashes, dt| flashes.map(|flash| { ..flash, age: flash.age + dt }).keep_if(|flash| flash.age < seconds(flash.kind))
 
 	light : Flash.Flash -> Vocabulary.Light
-	light = |flash| Light.point(flash.pos, colour(flash.age), range)
+	light = |flash| Light.point(flash.pos, colour(flash.kind, flash.age), range)
 
-	colour : F32 -> Rgb
-	colour = |age| {
-		ps1 = sample(glow, age / pal_frame)
+	colour : Pickup.Kind, F32 -> Rgb
+	colour = |kind, age| {
+		ps1 = sample(glow(kind), age / pal_frame)
 		{ r: ps1.r * strength, g: ps1.g * strength, b: ps1.b * strength }
 	}
 
@@ -43,23 +43,47 @@ Flash := [].{
 		newest.map(light)
 	}
 
-	seconds : F32
-	seconds = 33.0 * pal_frame
+	seconds : Pickup.Kind -> F32
+	seconds = |kind| match glow(kind).last() {
+		Ok(end) => end.frame * pal_frame
+		Err(_) => 0.0
+	}
 }
 
 # The light effect's colour each PAL frame, in PS1 units where 128 is full.
-# Keys and coins use particle type 6 and 2, which share one table
-# (PARTICLE_TYPE_2_6_7 in data_particles.c). Each frame sums the colours of
-# its two sprites, as ProcessAndRenderParticles in particles.c does.
+# Each frame sums the colours of its particle's two sprites, as
+# ProcessAndRenderParticles in particles.c does. The last point is black.
 Glow : { frame : F32, r : F32, g : F32, b : F32 }
 
-glow : List(Glow)
-glow = [
+glow : Pickup.Kind -> List(Glow)
+glow = |kind| match kind {
+	Fruit(_) => fruit_glow
+	_ => key_glow
+}
+
+# Keys and coins use particle type 6 and 2, which share one table
+# (PARTICLE_TYPE_2_6_7 in data_particles.c).
+key_glow : List(Glow)
+key_glow = [
 	{ frame: 0.0, r: 0.0, g: 0.0, b: 0.0 },
 	{ frame: 4.0, r: 25.0, g: 25.0, b: 45.0 },
 	{ frame: 9.0, r: 25.0, g: 25.0, b: 45.0 },
 	{ frame: 23.0, r: 19.0, g: 19.0, b: 19.0 },
 	{ frame: 33.0, r: 0.0, g: 0.0, b: 0.0 },
+]
+
+# A fruit uses particle type 4 (PARTICLE_TYPE_4_5_10). These points stay
+# within 1 PS1 unit of its frames.
+fruit_glow : List(Glow)
+fruit_glow = [
+	{ frame: 0.0, r: 0.0, g: 0.0, b: 0.0 },
+	{ frame: 4.0, r: 21.0, g: 10.0, b: 21.0 },
+	{ frame: 8.0, r: 41.0, g: 30.0, b: 41.0 },
+	{ frame: 11.0, r: 41.0, g: 30.0, b: 41.0 },
+	{ frame: 13.0, r: 37.0, g: 26.0, b: 37.0 },
+	{ frame: 16.0, r: 25.0, g: 18.0, b: 25.0 },
+	{ frame: 20.0, r: 6.0, g: 5.0, b: 6.0 },
+	{ frame: 24.0, r: 0.0, g: 0.0, b: 0.0 },
 ]
 
 sample : List(Glow), F32 -> Rgb
@@ -127,23 +151,26 @@ ps1 = |r, g, b| { r: r * strength, g: g * strength, b: b * strength }
 floor_key : Pickup.Pickup
 floor_key = { id: 0, cell: { x: 0, y: 1, z: 7 }, up: { x: 0, y: 1, z: 0 }, kind: Key, spin: 0.0, tilt: 0.0, bob: 0.0 }
 
+floor_fruit : Pickup.Pickup
+floor_fruit = { ..floor_key, kind: Fruit(Apple) }
+
 # The flash sits one cell above the item's face, along the face's up.
-expect Flash.at_pickup(floor_key) == { pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0 }
+expect Flash.at_pickup(floor_key) == { pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0, kind: Key }
 expect Flash.at_pickup({ ..floor_key, up: { x: -1, y: 0, z: 0 } }).pos == { x: -0.5, y: 1.0, z: 7.0 }
 
 # The colour copies the original's frames: black at the pickup, a pale blue
 # from 0.08 s to 0.18 s, grey at 0.46 s and black again at 0.66 s.
-expect near_rgb(Flash.colour(0.0), black)
-expect near_rgb(Flash.colour(0.04), ps1(12.5, 12.5, 22.5))
-expect near_rgb(Flash.colour(0.08), ps1(25.0, 25.0, 45.0)) and near_rgb(Flash.colour(0.18), ps1(25.0, 25.0, 45.0))
-expect near_rgb(Flash.colour(0.32), ps1(22.0, 22.0, 32.0))
-expect near_rgb(Flash.colour(0.46), ps1(19.0, 19.0, 19.0))
-expect near_rgb(Flash.colour(0.66), black) and near_rgb(Flash.colour(1.0), black)
+expect near_rgb(Flash.colour(Key, 0.0), black)
+expect near_rgb(Flash.colour(Key, 0.04), ps1(12.5, 12.5, 22.5))
+expect near_rgb(Flash.colour(Key, 0.08), ps1(25.0, 25.0, 45.0)) and near_rgb(Flash.colour(Key, 0.18), ps1(25.0, 25.0, 45.0))
+expect near_rgb(Flash.colour(Key, 0.32), ps1(22.0, 22.0, 32.0))
+expect near_rgb(Flash.colour(Key, 0.46), ps1(19.0, 19.0, 19.0))
+expect near_rgb(Flash.colour(Key, 0.66), black) and near_rgb(Flash.colour(Key, 1.0), black)
 
 # The face under the flash at its peak gets twice the PS1 colour over 128, before the BRDF's 1/pi.
-expect near(Flash.colour(0.1).r * centre_irradiance / pi, 50.0 / 128.0)
+expect near(Flash.colour(Key, 0.1).r * centre_irradiance / pi, 50.0 / 128.0)
 
-expect Flash.light({ pos: { x: 1.0, y: 2.0, z: 3.0 }, age: 0.1 }) == Light.point({ x: 1.0, y: 2.0, z: 3.0 }, Flash.colour(0.1), 2.0)
+expect Flash.light({ pos: { x: 1.0, y: 2.0, z: 3.0 }, age: 0.1, kind: Key }) == Light.point({ x: 1.0, y: 2.0, z: 3.0 }, Flash.colour(Key, 0.1), 2.0)
 
 # A flash ages each step and ends after 33 PAL frames.
 expect {
@@ -152,11 +179,21 @@ expect {
 	aged.map(|f| f.age) == [0.5] and Flash.advance(aged, 0.17) == []
 }
 
+# A fruit's flash peaks in pale violet from 0.16 s to 0.22 s and is black at 0.48 s.
+expect near_rgb(Flash.colour(Fruit(Apple), 0.0), black) and near_rgb(Flash.colour(Fruit(Pumpkin), 0.16), ps1(41.0, 30.0, 41.0)) and near_rgb(Flash.colour(Fruit(Apple), 0.22), ps1(41.0, 30.0, 41.0))
+expect near_rgb(Flash.colour(Fruit(Apple), 0.48), black) and near_rgb(Flash.colour(Fruit(Apple), 1.0), black)
+
+# A fruit's flash ends after 24 PAL frames.
+expect {
+	aged = Flash.advance([Flash.at_pickup(floor_fruit)], 0.47)
+	aged.map(|f| f.kind) == [Fruit(Apple)] and Flash.advance(aged, 0.02) == []
+}
+
 theme_lights : List(Vocabulary.Light)
 theme_lights = [Light.ambient(black), Light.sun({ x: 0.0, y: -1.0, z: 0.0 }, black), Light.directional({ x: 0.0, y: 1.0, z: 0.0 }, black)]
 
 flashes_at : List(F32) -> List(Flash.Flash)
-flashes_at = |zs| zs.map(|z| { pos: { x: 0.0, y: 1.5, z }, age: 0.1 })
+flashes_at = |zs| zs.map(|z| { pos: { x: 0.0, y: 1.5, z }, age: 0.1, kind: Key })
 
 # With a sun and a fill, 6 of the host's 8 lights are free. Past 6 the newest flashes keep their lights.
 expect Flash.lights(flashes_at([1.0, 2.0]), theme_lights).len() == 2
