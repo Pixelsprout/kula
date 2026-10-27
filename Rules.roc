@@ -12,20 +12,20 @@ Rules := [].{
 
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
-	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, flashes : List(Flash.Flash), unloads : List(Str) }
+	# bounce and chime are the Sound ids of the landing bounce and the coin chime, 0 until the kula pack loads.
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, chime : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, flashes : List(Flash.Flash), unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
 
 	restart : Model -> Model
-	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce, score: Score.die(model.score, model.level_number) }
+	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce, chime: model.chime, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, score: model.score, phase: Starting(start_pause) }
+	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, chime: model.chime, score: model.score, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
@@ -95,7 +95,7 @@ start_on : World.Meshes, U64, World.Level -> Rules.Model
 start_on = |meshes, level_number, level| {
 	pickups = Pickup.from_level(level)
 	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, flashes: [], unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, chime: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, flashes: [], unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -103,7 +103,7 @@ has_item : World.Level, World.Pose, World.Item -> Bool
 has_item = |level, pose, item| level.items.any(|entry| entry.cell == pose.cell and entry.up == pose.up and entry.item == item)
 
 meshes : World.Meshes
-meshes = { cube: 1, face: 5, ball: 4, sky: 1 }
+meshes = { cube: 1, face: 5, ball: 4, coin: 6, sky: 1 }
 
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
@@ -243,6 +243,29 @@ expect {
 	model = jump(jump_past("0 0 1 +y key"))
 	landed = List.repeat(0.01, 60).fold(model, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
 	landed.ball.motion == Still and landed.ball.pose.cell == cell(0, 1, 0) and landed.keys_left == 1
+}
+
+# The same jump over a floor coin, with the coin's bob held at one phase.
+over_coin : F32 -> Rules.Model
+over_coin = |bob| {
+	model = jump(jump_past("0 0 1 +y coin"))
+	held = { ..model, pickups: model.pickups.map(|pickup| { ..pickup, bob }) }
+	List.repeat(0.01, 60).fold(held, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
+}
+
+# A coin sits 20 units higher than a key and reaches 9 units further. So the
+# jump collects it near the top of its bob, 180 units up, and not near the
+# bottom, 140 units up.
+expect {
+	high = over_coin(0.25)
+	low = over_coin(0.75)
+	high.pickups == [] and high.score.level == 250 and low.pickups.len() == 1 and low.score.level == 0 and low.ball.pose.cell == cell(0, 1, 0)
+}
+
+# A coin adds 250 to the level score and leaves the keys as they were.
+expect {
+	coin = Rules.collect(on_face(two_faces("coin"), cell(-1, 0, 0)))
+	coin.score == { level: 250, total: 0 } and coin.keys_left == 1 and coin.pickups.map(|pickup| pickup.kind) == [Key] and coin.flashes.len() == 1
 }
 
 off_the_level : Rules.Model -> Rules.Model

@@ -20,6 +20,7 @@ import Theme
 import Hud
 import Pickup
 import Flash
+import Level
 
 Model : Rules.Model
 
@@ -29,16 +30,19 @@ launch = |_config| Launch.default
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.append(bounce_sound) }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat([bounce_sound, chime_sound]) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
 kula_pack : Str
 kula_pack = "kula"
 
-# assets/source/make_sounds.py writes it.
+# assets/source/make_sounds.py writes the sounds.
 bounce_sound : Str
 bounce_sound = "sound/bounce"
+
+chime_sound : Str
+chime_sound = "sound/chime"
 
 load_theme : U64 -> Command
 load_theme = |level_number| {
@@ -52,7 +56,7 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound) }
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound), chime: Sound.resolve(manifest, chime_sound) }
 	} else if model.phase == Cleared and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
@@ -79,8 +83,15 @@ step = |model, input, _results, dt| {
 		[]
 	}
 	unloads = model.unloads.map(|pack| Unload(pack))
-	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)) }
+	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)).concat(chimes(model, after)) }
 }
+
+# One chime for each coin the step collected. In a step, only a pickup takes
+# an item out of the pickups: a restart puts them all back.
+chimes : Model, Model -> List(Command)
+chimes = |before, after| before.pickups
+	.keep_if(|pickup| pickup.kind == Coin and !after.pickups.any(|left| left.id == pickup.id))
+	.map(|_| Sound.play(after.chime))
 
 # As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
 bounce : Model, Model -> List(Command)
@@ -202,10 +213,15 @@ won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 key_size : F32
 key_size = 0.3
 
+# coin.glb carries its own size and colour.
+mesh_colour : Rgb
+mesh_colour = { r: 1.0, g: 1.0, b: 1.0 }
+
 pickup_draw : World.Meshes, Pickup.Pickup -> Vocabulary.Draw
 pickup_draw = |meshes, pickup| {
 	look = match pickup.kind {
 		Key => { mesh: meshes.cube, size: key_size, tint: key_tint }
+		Coin => { mesh: meshes.coin, size: 1.0, tint: mesh_colour }
 	}
 	{ ..Draw.default, id: pickup_ids + pickup.id, mesh: look.mesh, pos: Pickup.centre(pickup), rot: Pickup.rot(pickup), scale: Vec3.scale(Vec3.one, look.size), tint: look.tint }
 }
@@ -216,12 +232,15 @@ manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "haze_face", "sky/haze", "sound/bounce"] }).model
-	loaded(loaded(booted, "kula", manifest([("ball", 4), ("sound/bounce", bounce_id)])), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "haze_face", "sky/haze", "sound/bounce", "sound/chime"] }).model
+	loaded(loaded(booted, "kula", manifest([("ball", 4), ("coin", 6), ("sound/bounce", bounce_id), ("sound/chime", chime_id)])), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
 }
 
 bounce_id : U32
 bounce_id = 65537
+
+chime_id : U32
+chime_id = 65538
 
 idle : Vocabulary.Input
 idle = Input.empty
@@ -242,10 +261,11 @@ lights_in = |scene| scene.nodes.join_map(
 	},
 )
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "sound/bounce"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
-expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, sky: 0 }
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "sound/bounce", "sound/chime"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, coin: 0, sky: 0 }
 expect init({ seed: 0, args: [], assets: [] }).model.bounce == 0 and started.bounce == bounce_id
-expect started.meshes == { cube: 1, face: 5, ball: 4, sky: 1 }
+expect init({ seed: 0, args: [], assets: [] }).model.chime == 0 and started.chime == chime_id
+expect started.meshes == { cube: 1, face: 5, ball: 4, coin: 6, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
@@ -528,12 +548,13 @@ expect {
 	after = step(switched, idle, QueryResults.empty, 0.1)
 	finished.commands == [Load({ pack: "inca", assets: ["inca_face", "sky/inca"] })]
 		and finished.model.phase == Cleared
-			and switched.meshes == { cube: 1, face: 7, ball: 4, sky: 2 }
+			and switched.meshes == { cube: 1, face: 7, ball: 4, coin: 6, sky: 2 }
 				and switched.bounce == bounce_id
-					and switched.level_number == 2
-						and switched.phase == Starting(Rules.start_pause)
-							and after.commands == [Unload("haze")]
-								and step(after.model, idle, QueryResults.empty, 0.1).commands == []
+					and switched.chime == chime_id
+						and switched.level_number == 2
+							and switched.phase == Starting(Rules.start_pause)
+								and after.commands == [Unload("haze")]
+									and step(after.model, idle, QueryResults.empty, 0.1).commands == []
 }
 
 # A Cleared level sends its Load once.
@@ -590,4 +611,33 @@ expect {
 	open = { ..at_pose(on_level(3), before_exit), keys_left: 0 }
 	finished = step(open, up_held, QueryResults.empty, 0.1)
 	finished.model.phase == Won and finished.commands == []
+}
+
+# Three blocks in a row with a coin on the middle one. The ball starts on the last, facing it.
+coin_run : Model
+coin_run = {
+	level = Level.parse("#\n#\n#\n\n0 0 1 +y coin\nstart 0 0 2 +y -z\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level), keys_left: 0 }
+}
+
+# A coin draws coin.glb unscaled, bobbing 140 to 180 units above its face.
+expect {
+	coins = draws_in(view(coin_run)).keep_if(|d| d.mesh == coin_run.meshes.coin)
+	match coins {
+		[coin] => coin.id == pickup_ids and coin.pos.z == 1.0 and coin.pos.y - 0.5 >= 140.0 / 512.0 and coin.pos.y - 0.5 <= 180.0 / 512.0 and coin.scale == Vec3.one and coin.tint == mesh_colour
+		_ => False
+	}
+}
+
+# A roll onto the coin collects it, plays the chime once and adds 250 to the level score.
+expect {
+	rolling = step(coin_run, up_held, QueryResults.empty, 0.01)
+	run = List.repeat(0.01, 60).fold(
+		{ model: rolling.model, chimes: rolling.commands.keep_if(|c| c == Sound.play(chime_id)).len() },
+		|so_far, dt| {
+			next = step(so_far.model, idle, QueryResults.empty, dt)
+			{ model: next.model, chimes: so_far.chimes + next.commands.keep_if(|c| c == Sound.play(chime_id)).len() }
+		},
+	)
+	run.chimes == 1 and run.model.pickups == [] and run.model.score.level == 250 and run.model.ball.pose.cell == { x: 0, y: 1, z: 1 }
 }

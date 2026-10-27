@@ -3,9 +3,9 @@
 World := [].{
 	Cell : { x : I32, y : I32, z : I32 }
 	Pose : { cell : Cell, up : Cell, forward : Cell }
-	Item : [Key, Exit]
+	Item : [Key, Coin, Exit]
 	# An item sits in cell, on the face of the block at cell - up.
 	Level : { blocks : Set(Cell), items : List({ cell : Cell, up : Cell, item : Item }), start : Pose }
 	# The ids Kula draws with. sky is a sky id, not a mesh id.
-	Meshes : { cube : U32, face : U32, ball : U32, sky : U32 }
+	Meshes : { cube : U32, face : U32, ball : U32, coin : U32, sky : U32 }
 }

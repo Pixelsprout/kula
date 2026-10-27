@@ -5,7 +5,7 @@ import Grid
 
 # An item that the ball collects by touch. A new kind adds a Kind tag and a row in look.
 Pickup := [].{
-	Kind : [Key]
+	Kind : [Key, Coin]
 
 	# spin, tilt and bob are phases in turns from 0 to 1, as the original keeps three angles for each item.
 	# id is the place among the level's pickups, so a pickup keeps it after a restart.
@@ -16,6 +16,7 @@ Pickup := [].{
 		.join_map(
 			|entry| match entry.item {
 				Key => [{ cell: entry.cell, up: entry.up, kind: Key }]
+				Coin => [{ cell: entry.cell, up: entry.up, kind: Coin }]
 				Exit => []
 			},
 		)
@@ -78,6 +79,7 @@ Look : { lift : F32, touch : F32, spin : F32, tilt : F32, tilt_size : F32, bob :
 look : Pickup.Kind -> Look
 look = |kind| match kind {
 	Key => { lift: 130.0, touch: 22500.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 1000 }
+	Coin => { lift: 150.0, touch: 25600.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 250 }
 }
 
 # The original adds 10000 for the ball to every item's collisionDistance.
@@ -141,6 +143,11 @@ expect {
 
 # A quarter of the bob lifts the centre 20 units more.
 expect near(Pickup.centre({ ..floor_key, bob: 0.25 }).y, 0.5 + 160.0 / 512.0)
+
+# A coin's reach is 189 units, 0.37 cell. Its centre is 20 units above a key's.
+expect near(Pickup.reach_squared(Coin), 35600.0 / 512.0 / 512.0) and near(Pickup.centre({ ..floor_key, kind: Coin }).y, 0.5 + 160.0 / 512.0)
+
+expect Pickup.points(Coin) == 250
 
 # On a -x face the centre lifts along -x.
 expect {
