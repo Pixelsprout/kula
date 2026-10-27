@@ -108,6 +108,13 @@ OBJ_EXIT = 0x07
 OBJ_PLAYER_SPAWN_PAUSED = 0x1D
 OBJ_PLAYER_SPAWN = 0x1E
 OBJ_KEY = 0x1F
+OBJ_COIN = 0x25
+# Kula has only the bronze coin. Variants 0 and 1 score 750 and 500 (level_update3.c:231-239).
+COIN_BRONZE = 2
+COIN_NAMES = {0: "gold coin", 1: "silver coin"}
+# Level init swaps any of these for the first fruit not yet collected (level_update2.c:126-144),
+# so Kula's level text names only that a fruit is there.
+FRUITS = {0x2B, 0x2C, 0x2D, 0x2E, 0x2F}
 
 # Face slots and directions share one order (wiki "Directions", block_utils.c).
 DIRECTIONS = [(0, 0, -1), (1, 0, 0), (0, 1, 0), (0, -1, 0), (-1, 0, 0), (0, 0, 1)]
@@ -338,9 +345,16 @@ def convert(level):
         if tuple(record["position"]) != cell:
             problems.append(f"record at {cell} names position {record['position']}")
         blocks.add(cell)
-        for face, object_id, rotation, _ in record["objects"]:
+        for face, object_id, rotation, variant in record["objects"]:
             if object_id == OBJ_KEY:
                 items.append((cell, face, "key"))
+            elif object_id == OBJ_COIN:
+                if variant == COIN_BRONZE:
+                    items.append((cell, face, "coin"))
+                else:
+                    problems.append(COIN_NAMES.get(variant, f"coin (variant {variant})"))
+            elif object_id in FRUITS:
+                items.append((cell, face, "fruit"))
             elif object_id == OBJ_EXIT:
                 items.append((cell, face, "exit"))
             elif object_id in (OBJ_PLAYER_SPAWN, OBJ_PLAYER_SPAWN_PAUSED):

@@ -116,7 +116,7 @@ RECORDS = [
 
 def count_text(text):
     """Count the blocks, keys, exits and starts of a level text the way Level.roc reads it."""
-    counts = {"blocks": 0, "key": 0, "exit": 0, "start": 0}
+    counts = {"blocks": 0, "key": 0, "exit": 0, "start": 0, "coin": 0, "fruit": 0}
     for line in text.splitlines():
         if " " in line:
             parts = line.split()
@@ -130,7 +130,7 @@ def count_text(text):
 
 
 def count_grid(level):
-    counts = {"blocks": 0, "key": 0, "exit": 0, "start": 0}
+    counts = {"blocks": 0, "key": 0, "exit": 0, "start": 0, "coin": 0, "fruit": 0}
     for value in level["cells"].values():
         if value == 0 or (value >= cl.RECORD_POINTER and level["records"][value - cl.RECORD_POINTER]["type"] == 0):
             counts["blocks"] += 1
@@ -142,6 +142,10 @@ def count_grid(level):
                 counts["exit"] += 1
             elif object_id in (cl.OBJ_PLAYER_SPAWN, cl.OBJ_PLAYER_SPAWN_PAUSED):
                 counts["start"] += 1
+            elif object_id == cl.OBJ_COIN:
+                counts["coin"] += 1
+            elif object_id in cl.FRUITS:
+                counts["fruit"] += 1
     return counts
 
 
@@ -167,7 +171,7 @@ class ConvertTest(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_text_counts_match_the_grid(self):
-        data = level_bytes(PLAIN, RECORDS)
+        data = level_bytes(PLAIN, RECORDS + [(0, (12, 10, 10), {0: (cl.OBJ_COIN, 0, 2), 2: (0x2E, 0)})])
         disc = self.disc([level_bytes(PLAIN[:1], RECORDS[:1]), data])
         out_path = os.path.join(self.dir.name, "level.txt")
         code, _, err = self.run_main(disc, "2", "-o", out_path)
@@ -175,7 +179,7 @@ class ConvertTest(unittest.TestCase):
         with open(out_path) as f:
             text = f.read()
         self.assertEqual(count_text(text), count_grid(cl.parse_level(data)))
-        self.assertEqual(count_text(text), {"blocks": 7, "key": 2, "exit": 1, "start": 1})
+        self.assertEqual(count_text(text), {"blocks": 8, "key": 2, "exit": 1, "start": 1, "coin": 1, "fruit": 1})
 
     def test_axes_turn_original_minus_z_to_kula_up(self):
         text = cl.convert(cl.parse_level(level_bytes(PLAIN, RECORDS)))
@@ -191,18 +195,32 @@ class ConvertTest(unittest.TestCase):
             "start 0 0 2 +y -z\n",
         )
 
+    def test_bronze_coins_and_any_fruit_write_entries(self):
+        records = RECORDS + [(0, (12, 10, 10), {0: (cl.OBJ_COIN, 0, 2), 2: (0x2E, 0)}), (0, (11, 10, 10), {0: (0x2B, 0)})]
+        text = cl.convert(cl.parse_level(level_bytes(PLAIN, records)))
+        self.assertEqual(
+            text.split("\n\n")[1],
+            "2 0 0 +y coin\n"
+            "2 0 2 +y exit\n"
+            "1 0 0 +y fruit\n"
+            "2 0 0 +z fruit\n"
+            "1 0 2 +y key\n"
+            "2 0 2 +x key\n"
+            "start 0 0 2 +y -z\n",
+        )
+
     def test_unsupported_objects_are_named(self):
-        records = RECORDS + [(0, (12, 10, 10), {0: (0x25, 0), 2: (0x2E, 0)}), (6, (11, 10, 10), None)]
+        records = RECORDS + [(0, (12, 10, 10), {0: (0x25, 0), 2: (0x25, 0, 1), 5: (0x1B, 0)}), (6, (11, 10, 10), None)]
         with self.assertRaises(cl.Unsupported) as caught:
             cl.convert(cl.parse_level(level_bytes(PLAIN, records)))
-        self.assertEqual(str(caught.exception), "Kula cannot show: banana, coin, crumbling block")
+        self.assertEqual(str(caught.exception), "Kula cannot show: crumbling block, fruit bowl, gold coin, silver coin")
 
     def test_bad_record_pointers_are_named_with_the_other_features(self):
         records = RECORDS + [(0, (12, 10, 10), {0: (0x25, 0)})]
         data = with_cell(level_bytes(PLAIN, records), PLAIN[0], cl.RECORD_POINTER + 10)
         with self.assertRaises(cl.Unsupported) as caught:
             cl.convert(cl.parse_level(data))
-        self.assertEqual(str(caught.exception), "Kula cannot show: cell (10, 10, 10) points to record 10, past the last record, coin")
+        self.assertEqual(str(caught.exception), "Kula cannot show: cell (10, 10, 10) points to record 10, past the last record, gold coin")
 
     def test_fire_cells_are_named(self):
         disc = self.disc([with_cell(level_bytes(PLAIN, RECORDS), PLAIN[0], 1)])
