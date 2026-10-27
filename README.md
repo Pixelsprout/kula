@@ -60,7 +60,8 @@ same check with `scripts/check-header.sh`.
 
 `.github/workflows/ci.yml` runs on macOS arm64, Ubuntu and Windows with only
 Roc installed. It checks the header, then runs `roc fmt --check`, `roc check`,
-`roc test` and 30 frames of `roc main.roc` against the bundle URLs.
+`roc test` and 30 frames of `roc main.roc` against the bundle URLs. A
+`scripts` job on Ubuntu runs the tests of `scripts/convert_level.py`.
 
 ## Controls
 
@@ -225,8 +226,44 @@ layer first. A blank line separates two layers.
 | `K` | A block with a key on top |
 | `E` | The exit block |
 
-A level needs exactly one `S`. A level that does not parse stops the game
-with the parse error when that level starts.
+A line with a space is an entry. An entry puts an item or the start on any
+face of a block. Entries come after the last layer, one on each line:
+
+| Entry | Meaning |
+|---|---|
+| `x y z face item` | Item `key` or `exit` on face `face` of the block at `x y z` |
+| `start x y z face forward` | The ball starts on face `face` of the block at `x y z`, facing `forward` |
+
+A face or a forward is `+x`, `-x`, `+y`, `-y`, `+z` or `-z`. The forward
+must be at right angles to the face. The block must be in the grid. `K` and
+`E` are shortcuts for an entry on the `+y` face. `S` is a shortcut for
+`start x y z +y -z`.
+
+A level needs exactly one start, from `S` or from an entry. A level that
+does not parse stops the game with the parse error when that level starts.
+
+### Convert a level from the original
+
+`scripts/convert_level.py` reads a Hiro level of Roll Away, the USA
+release, from your own disc image and writes it in this format. It needs
+only Python 3. The image must be one MODE2/2352 track (`.bin`). Kula does
+not ship any disc data.
+
+```sh
+python3 scripts/convert_level.py DISC.bin 1 --list
+python3 scripts/convert_level.py DISC.bin 1 -o levels/level1.txt
+```
+
+`--list` prints every block type, record type and object of the level, with
+counts. Without `--list`, the script stops if the level uses a feature that
+Kula cannot show, and it names each one. The script turns the original
+`(x, y, z)` to Kula's `(x, -z, y)`. The original's `-z` is the up of the
+Hiro start face, so it becomes Kula's `+y`. The turn keeps right-handed
+axes, so the level is not mirrored. The script moves the lowest block to 0
+on each axis.
+
+`python3 -m unittest discover -s scripts` tests the script on a synthetic
+disc image.
 
 ### Example: level1
 

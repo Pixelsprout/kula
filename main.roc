@@ -140,7 +140,7 @@ action = |controls|
 view : Model -> Vocabulary.Scene
 view = |model| {
 	theme = Theme.of_level(model.level_number)
-	exits = model.level.items.keep_if(|entry| entry.item == Exit).map(|entry| below(entry.cell))
+	exits = model.level.items.keep_if(|entry| entry.item == Exit).map(|entry| Grid.sub(entry.cell, entry.up))
 	exit_tint = if Rules.exit_open(model) {
 		open_exit_tint
 	} else {
@@ -201,9 +201,6 @@ playing_ball_tint = { r: 1.0, g: 1.0, b: 1.0 }
 
 won_ball_tint : Rgb
 won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
-
-below : World.Cell -> World.Cell
-below = |cell| { ..cell, y: cell.y - 1 }
 
 cube : World.Meshes, U64, World.Cell, F32, Rgb -> Vocabulary.Draw
 cube = |meshes, id, cell, size, tint| { ..Draw.default, id, mesh: meshes.cube, pos: Grid.to_vec3(cell), scale: Vec3.scale(Vec3.one, size), tint }
