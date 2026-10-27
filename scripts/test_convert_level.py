@@ -33,19 +33,29 @@ def record(record_type, position, slots=None):
     return bytes(data)
 
 
-def level_bytes(plain, records, settings=True):
+def grid_index(cell):
+    x, y, z = cell
+    return (x * cl.SIZE + y) * cl.SIZE + z
+
+
+def level_bytes(plain, records):
     """plain is a list of cells. records is a list of (type, cell, slots)."""
     grid = [-1] * (cl.SIZE**3)
-    for x, y, z in plain:
-        grid[x * 1156 + y * 34 + z] = 0
-    for n, (_, (x, y, z), _) in enumerate(records):
-        grid[x * 1156 + y * 34 + z] = 5 + n
+    for cell in plain:
+        grid[grid_index(cell)] = 0
+    for n, (_, cell, _) in enumerate(records):
+        grid[grid_index(cell)] = cl.RECORD_POINTER + n
     data = struct.pack(f"<{len(grid)}h", *grid)
     data += struct.pack("<3h", len(plain) + len(records), 0, len(records))
     data += b"".join(record(t, cell, slots) for t, cell, slots in records)
-    if settings:
-        data += struct.pack("<7h", 666, 0, 0, 0, 0, 0, 99) + b"\xff" * 242
+    data += struct.pack("<7h", cl.RECORD_LEVEL_SETTINGS, 0, 0, 0, 0, 0, 99) + b"\xff" * 242
     return data
+
+
+def with_cell(data, cell, value):
+    changed = bytearray(data)
+    struct.pack_into("<h", changed, grid_index(cell) * 2, value)
+    return bytes(changed)
 
 
 def pak_bytes(files):
@@ -77,11 +87,11 @@ def dir_record(name, lba, size, is_dir):
     return rec + b"\0" * (length - len(rec))
 
 
-def disc_image(pak):
-    """A MODE2/2352 image with HIRO/HIRO.PAK in its ISO9660 file system."""
+def disc_image(pak, pak_name="HIRO.PAK;1"):
+    """A MODE2/2352 image with HIRO/<pak_name> in its ISO9660 file system."""
     root_lba, hiro_lba, pak_lba = 20, 21, 22
     root = dir_record(b"\0", root_lba, 2048, True) + dir_record(b"\1", root_lba, 2048, True) + dir_record("HIRO", hiro_lba, 2048, True)
-    hiro = dir_record(b"\0", hiro_lba, 2048, True) + dir_record(b"\1", root_lba, 2048, True) + dir_record("HIRO.PAK;1", pak_lba, len(pak), False)
+    hiro = dir_record(b"\0", hiro_lba, 2048, True) + dir_record(b"\1", root_lba, 2048, True) + dir_record(pak_name, pak_lba, len(pak), False)
     pvd = bytearray(2048)
     pvd[0:6] = b"\x01CD001"
     pvd[156:190] = dir_record(b"\0", root_lba, 2048, True)
@@ -122,7 +132,7 @@ def count_text(text):
 def count_grid(level):
     counts = {"blocks": 0, "key": 0, "exit": 0, "start": 0}
     for value in level["cells"].values():
-        if value == 0 or (value >= 5 and level["records"][value - 5]["type"] == 0):
+        if value == 0 or (value >= cl.RECORD_POINTER and level["records"][value - cl.RECORD_POINTER]["type"] == 0):
             counts["blocks"] += 1
     for r in level["records"]:
         for _, object_id, _, _ in r["objects"]:
@@ -140,11 +150,14 @@ class ConvertTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
 
-    def disc(self, levels):
-        path = os.path.join(self.dir.name, "disc.bin")
+    def disc(self, levels, pak_name="HIRO.PAK;1"):
         files = [(f"LEVEL {n + 1}", data) for n, data in enumerate(levels)]
+        return self.write("disc.bin", disc_image(pak_bytes(files), pak_name))
+
+    def write(self, name, data):
+        path = os.path.join(self.dir.name, name)
         with open(path, "wb") as f:
-            f.write(disc_image(pak_bytes(files)))
+            f.write(data)
         return path
 
     def run_main(self, *args):
@@ -166,7 +179,6 @@ class ConvertTest(unittest.TestCase):
 
     def test_axes_turn_original_minus_z_to_kula_up(self):
         text = cl.convert(cl.parse_level(level_bytes(PLAIN, RECORDS)))
-        # Kula (x, y, z) is the original (x, -z, y), shifted so the lowest block is at 0.
         self.assertEqual(
             text,
             "#..\n"
@@ -185,21 +197,22 @@ class ConvertTest(unittest.TestCase):
             cl.convert(cl.parse_level(level_bytes(PLAIN, records)))
         self.assertEqual(str(caught.exception), "Kula cannot show: banana, coin, crumbling block")
 
+    def test_bad_record_pointers_are_named_with_the_other_features(self):
+        records = RECORDS + [(0, (12, 10, 10), {0: (0x25, 0)})]
+        data = with_cell(level_bytes(PLAIN, records), PLAIN[0], cl.RECORD_POINTER + 10)
+        with self.assertRaises(cl.Unsupported) as caught:
+            cl.convert(cl.parse_level(data))
+        self.assertEqual(str(caught.exception), "Kula cannot show: cell (10, 10, 10) points to record 10, past the last record, coin")
+
     def test_fire_cells_are_named(self):
-        data = bytearray(level_bytes(PLAIN, RECORDS))
-        x, y, z = PLAIN[0]
-        struct.pack_into("<h", data, (x * 1156 + y * 34 + z) * 2, 1)
-        disc = self.disc([bytes(data)])
+        disc = self.disc([with_cell(level_bytes(PLAIN, RECORDS), PLAIN[0], 1)])
         code, out, err = self.run_main(disc, "1")
         self.assertEqual((code, out), (1, ""))
         self.assertEqual(err, "Hiro level 1: Kula cannot show: fire block\n")
 
     def test_unknown_cell_values_are_named(self):
-        data = bytearray(level_bytes(PLAIN, RECORDS))
-        x, y, z = PLAIN[0]
-        struct.pack_into("<h", data, (x * 1156 + y * 34 + z) * 2, -2)
         with self.assertRaises(cl.Unsupported) as caught:
-            cl.convert(cl.parse_level(bytes(data)))
+            cl.convert(cl.parse_level(with_cell(level_bytes(PLAIN, RECORDS), PLAIN[0], -2)))
         self.assertEqual(str(caught.exception), "Kula cannot show: cell value -2")
 
     def test_list_counts_every_feature(self):
@@ -223,6 +236,34 @@ class ConvertTest(unittest.TestCase):
             "    player spawn on Z- (Kula +y): 1\n"
             "  start time: 99 s\n",
         )
+
+    def assert_fails(self, args, message):
+        code, out, err = self.run_main(*args)
+        self.assertEqual((code, out, err), (1, "", message + "\n"))
+
+    def test_a_missing_disc_is_one_line(self):
+        path = os.path.join(self.dir.name, "missing.bin")
+        self.assert_fails([path, "1"], f"{path}: No such file or directory")
+
+    def test_a_disc_that_is_not_iso9660_is_one_line(self):
+        path = self.write("bad.bin", b"\0" * (cl.SECTOR_SIZE * 17))
+        self.assert_fails([path, "1"], f"{path}: no ISO9660 primary volume descriptor at sector 16")
+
+    def test_a_damaged_pak_is_one_line(self):
+        path = self.write("damaged.bin", disc_image(b"\xff" * 64))
+        code, out, err = self.run_main(path, "1")
+        self.assertEqual((code, out), (1, ""))
+        self.assertTrue(err.startswith(f"{path}: not a Roll Away disc image ("), err)
+        self.assertEqual(err.count("\n"), 1)
+
+    def test_a_disc_without_the_pak_is_one_line(self):
+        path = self.disc([level_bytes(PLAIN, RECORDS)], pak_name="OTHER.PAK;1")
+        self.assert_fails([path, "1"], f"{path}: HIRO/HIRO.PAK is not on the disc")
+
+    def test_a_level_out_of_range_is_one_line(self):
+        path = self.disc([level_bytes(PLAIN, RECORDS)])
+        self.assert_fails([path, "2"], f"{path}: Hiro level 2 is not in HIRO.PAK")
+        self.assert_fails([path, "0", "--list"], f"{path}: Hiro level 0 is not in HIRO.PAK")
 
 
 if __name__ == "__main__":

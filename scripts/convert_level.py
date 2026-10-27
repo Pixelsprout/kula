@@ -34,6 +34,11 @@ FACE_SLOT_OFFSET = 0x02
 FACE_SLOT_SIZE = 32
 POSITION_OFFSET = 0xFA
 
+# A cell value of RECORD_POINTER or more points to record value - RECORD_POINTER.
+RECORD_POINTER = 5
+RECORD_LEVEL_FLAGS = 9
+RECORD_LEVEL_SETTINGS = 666
+
 CELL_NAMES = {-1: "empty", 0: "plain", 1: "fire", 2: "ice", 3: "invisible", 4: "acid"}
 
 # Record types 0 to 4 are object blocks: a block with six object slots, one per face.
@@ -47,8 +52,8 @@ RECORD_NAMES = {
     6: "crumbling block",
     7: "flashing block",
     8: "laser block",
-    9: "level flags",
-    666: "level settings",
+    RECORD_LEVEL_FLAGS: "level flags",
+    RECORD_LEVEL_SETTINGS: "level settings",
 }
 
 # include/common.h, ObjectType. Ids 7 and 8 mean the exit and the timer pause in a face slot.
@@ -115,14 +120,31 @@ class Unsupported(Exception):
     pass
 
 
+class DiscError(Exception):
+    pass
+
+
+def cell_name(value):
+    return CELL_NAMES.get(value, f"cell value {value}")
+
+
+def record_name(record_type):
+    return RECORD_NAMES.get(record_type, f"record type {record_type}")
+
+
+def object_name(object_id):
+    return OBJECT_NAMES.get(object_id, f"object 0x{object_id:02X}")
+
+
+def level_flags(record):
+    """Return the hidden and the farsighted invisible flags of a level flags record."""
+    return struct.unpack_from("<2h", record["raw"], 2)
+
+
 def to_kula(v):
     """Map an original vector or cell (x, y, z) to Kula's axes: (x, -z, y).
 
-    Hiro levels lie on the original's Z- faces: the spawn there gets
-    gravityDir, the ball's up, of -z (SetPlayerRotation). So original -z is
-    Kula's +y. Original +y becomes Kula's +z, so a spawn with rotation 3 faces
-    Kula's default -z. The map is a turn, not a mirror, and both games use
-    right = forward x up.
+    The map is a turn, not a mirror, so right = forward x up holds in both games.
     """
     x, y, z = v
     return (x, -z, y)
@@ -139,15 +161,15 @@ def read_iso_file(image, path):
 
     pvd = sector(16)
     if pvd[0:6] != b"\x01CD001":
-        raise ValueError("no ISO9660 primary volume descriptor at sector 16")
+        raise DiscError("no ISO9660 primary volume descriptor at sector 16")
     lba, size = struct.unpack_from("<I", pvd, 158)[0], struct.unpack_from("<I", pvd, 166)[0]
     for i, part in enumerate(path):
         entries = dir_entries(extent(lba, size))
         if part not in entries:
-            raise ValueError(f"{'/'.join(path[: i + 1])} is not on the disc")
+            raise DiscError(f"{'/'.join(path[: i + 1])} is not on the disc")
         lba, size, is_dir = entries[part]
         if is_dir != (i < len(path) - 1):
-            raise ValueError(f"{'/'.join(path[: i + 1])} has the wrong kind")
+            raise DiscError(f"{'/'.join(path[: i + 1])} has the wrong kind")
     return extent(lba, size)
 
 
@@ -185,7 +207,13 @@ def level_data(files, number):
     for file_name, data in files:
         if file_name == name:
             return data
-    raise ValueError(f"{name} is not in the PAK")
+    raise DiscError(f"Hiro level {number} is not in {PAK_PATH[-1]}")
+
+
+def read_level(disc, number):
+    with open(disc, "rb") as image:
+        pak = read_iso_file(image, PAK_PATH)
+    return parse_level(level_data(unpack_pak(pak), number))
 
 
 def parse_level(data):
@@ -217,25 +245,28 @@ def parse_level(data):
 
 
 def block_records(level):
-    """Yield (cell, record) for each grid cell that points to a record."""
+    """Return (cell, record) for each grid cell that points to a record, and a problem for each bad pointer."""
+    pairs, problems = [], []
     for cell, value in sorted(level["cells"].items()):
-        if value >= 5:
-            index = value - 5
-            if index >= level["count"]:
-                raise Unsupported(f"cell {cell} points to record {index}, past the last record")
-            yield cell, level["records"][index]
+        if value >= RECORD_POINTER:
+            index = value - RECORD_POINTER
+            if index < level["count"]:
+                pairs.append((cell, level["records"][index]))
+            else:
+                problems.append(f"cell {cell} points to record {index}, past the last record")
+    return pairs, problems
 
 
 def features(level):
-    cells = Counter("record" if v >= 5 else CELL_NAMES.get(v, f"cell value {v}") for v in level["cells"].values())
-    records = Counter(RECORD_NAMES.get(r["type"], f"record type {r['type']}") for r in level["records"])
+    cells = Counter("record" if v >= RECORD_POINTER else cell_name(v) for v in level["cells"].values())
+    records = Counter(record_name(r["type"]) for r in level["records"])
     objects = Counter()
     for r in level["records"]:
         for face, object_id, _, variant in r["objects"]:
-            name = OBJECT_NAMES.get(object_id, f"object 0x{object_id:02X}")
+            name = object_name(object_id)
             if variant > 0:
                 name += f" (variant {variant})"
-            objects[f"{name} on {DIRECTION_NAMES[face]} (Kula {axis_name(to_kula(DIRECTIONS[face]))})"] += 1
+            objects[f"{name} on {DIRECTION_NAMES[face]} (Kula {kula_face(face)})"] += 1
     return cells, records, objects
 
 
@@ -245,13 +276,13 @@ def format_list(number, level):
     for title, counts in [("cells", cells), ("records", records), ("objects", objects)]:
         lines.append(f"  {title}:")
         lines += [f"    {name}: {count}" for name, count in sorted(counts.items())]
-    settings = [r for r in level["records"] if r["type"] == 666]
-    for r in settings:
-        seconds = struct.unpack_from("<h", r["raw"], 0x0C)[0]
-        lines.append(f"  start time: {seconds} s")
     for r in level["records"]:
-        if r["type"] == 9:
-            hidden, farsighted = struct.unpack_from("<2h", r["raw"], 2)
+        if r["type"] == RECORD_LEVEL_SETTINGS:
+            seconds = struct.unpack_from("<h", r["raw"], 0x0C)[0]
+            lines.append(f"  start time: {seconds} s")
+    for r in level["records"]:
+        if r["type"] == RECORD_LEVEL_FLAGS:
+            hidden, farsighted = level_flags(r)
             lines.append(f"  level flags: hidden {hidden}, farsighted invisible {farsighted}")
     return "\n".join(lines) + "\n"
 
@@ -261,6 +292,10 @@ def axis_name(v):
         if axis == v:
             return name
     raise ValueError(f"{v} is not an axis")
+
+
+def kula_face(face):
+    return axis_name(to_kula(DIRECTIONS[face]))
 
 
 def spawn_forward(face, rotation):
@@ -276,19 +311,19 @@ def spawn_forward(face, rotation):
 
 def convert(level):
     """Return Kula's level text. Raise Unsupported that names every feature Kula lacks."""
-    problems = []
+    pairs, problems = block_records(level)
     blocks = set()
     items = []
     starts = []
     for cell, value in level["cells"].items():
         if value == 0:
             blocks.add(cell)
-        elif value < 5:
-            problems.append(f"{CELL_NAMES[value]} block" if value in CELL_NAMES else f"cell value {value}")
-    for cell, record in block_records(level):
+        elif value < RECORD_POINTER:
+            problems.append(f"{cell_name(value)} block" if value in CELL_NAMES else cell_name(value))
+    for cell, record in pairs:
         record_type = record["type"]
         if record_type != 0:
-            problems.append(RECORD_NAMES.get(record_type, f"record type {record_type}"))
+            problems.append(record_name(record_type))
             continue
         if tuple(record["position"]) != cell:
             problems.append(f"record at {cell} names position {record['position']}")
@@ -303,16 +338,16 @@ def convert(level):
                     problems.append("player spawn (paused): the face pauses the level clock")
                 starts.append((cell, face, spawn_forward(face, rotation)))
             else:
-                problems.append(OBJECT_NAMES.get(object_id, f"object 0x{object_id:02X}"))
-    referenced = {id(r) for _, r in block_records(level)}
+                problems.append(object_name(object_id))
+    referenced = {id(r) for _, r in pairs}
     for record in level["records"]:
         if id(record) in referenced:
             continue
-        if record["type"] == 9:
-            if any(struct.unpack_from("<2h", record["raw"], 2)):
+        if record["type"] == RECORD_LEVEL_FLAGS:
+            if any(level_flags(record)):
                 problems.append("level flags")
-        elif record["type"] != 666:
-            problems.append(f"{RECORD_NAMES.get(record['type'], 'record type ' + str(record['type']))} with no cell")
+        elif record["type"] != RECORD_LEVEL_SETTINGS:
+            problems.append(f"{record_name(record['type'])} with no cell")
     if len(starts) != 1:
         problems.append(f"{len(starts)} player spawns")
     if problems:
@@ -339,11 +374,16 @@ def write_text(blocks, items, start):
     lines.append("")
     for cell, face, item in sorted(items, key=lambda e: (e[2], local(e[0]), e[1])):
         x, y, z = local(cell)
-        lines.append(f"{x} {y} {z} {axis_name(to_kula(DIRECTIONS[face]))} {item}")
+        lines.append(f"{x} {y} {z} {kula_face(face)} {item}")
     cell, face, forward = start
     x, y, z = local(cell)
-    lines.append(f"start {x} {y} {z} {axis_name(to_kula(DIRECTIONS[face]))} {axis_name(to_kula(forward))}")
+    lines.append(f"start {x} {y} {z} {kula_face(face)} {axis_name(to_kula(forward))}")
     return "\n".join(lines) + "\n"
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    return 1
 
 
 def main(argv=None):
@@ -354,17 +394,21 @@ def main(argv=None):
     parser.add_argument("-o", "--output", help="the level file to write; stdout without it")
     args = parser.parse_args(argv)
 
-    with open(args.disc, "rb") as image:
-        pak = read_iso_file(image, PAK_PATH)
-    level = parse_level(level_data(unpack_pak(pak), args.level))
+    try:
+        level = read_level(args.disc, args.level)
+    except OSError as err:
+        return fail(f"{args.disc}: {err.strerror or err}")
+    except DiscError as err:
+        return fail(f"{args.disc}: {err}")
+    except (struct.error, zlib.error, IndexError, UnicodeDecodeError) as err:
+        return fail(f"{args.disc}: not a Roll Away disc image ({err})")
     if args.list:
         sys.stdout.write(format_list(args.level, level))
         return 0
     try:
         text = convert(level)
     except Unsupported as err:
-        print(f"Hiro level {args.level}: {err}", file=sys.stderr)
-        return 1
+        return fail(f"Hiro level {args.level}: {err}")
     if args.output:
         with open(args.output, "w", newline="\n") as out:
             out.write(text)
