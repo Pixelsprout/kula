@@ -195,7 +195,7 @@ expect {
 }
 
 expect {
-	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Fruit }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } } }, Pumpkin)
+	pickups = Pickup.from_level({ blocks: Set.empty(), items: [{ cell: { x: 0, y: 1, z: 3 }, up: { x: 0, y: 1, z: 0 }, item: Fruit }], start: { cell: { x: 0, y: 1, z: 9 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } }, time: 99 }, Pumpkin)
 	pickups.map(|p| p.kind) == [Fruit(Pumpkin)]
 }
 
