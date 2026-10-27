@@ -38,8 +38,8 @@ def grid_index(cell):
     return (x * cl.SIZE + y) * cl.SIZE + z
 
 
-def level_bytes(plain, records):
-    """plain is a list of cells. records is a list of (type, cell, slots)."""
+def level_bytes(plain, records, seconds=99):
+    """plain is a list of cells. records is a list of (type, cell, slots). seconds is the start time."""
     grid = [-1] * (cl.SIZE**3)
     for cell in plain:
         grid[grid_index(cell)] = 0
@@ -48,7 +48,7 @@ def level_bytes(plain, records):
     data = struct.pack(f"<{len(grid)}h", *grid)
     data += struct.pack("<3h", len(plain) + len(records), 0, len(records))
     data += b"".join(record(t, cell, slots) for t, cell, slots in records)
-    data += struct.pack("<7h", cl.RECORD_LEVEL_SETTINGS, 0, 0, 0, 0, 0, 99) + b"\xff" * 242
+    data += struct.pack("<7h", cl.RECORD_LEVEL_SETTINGS, 0, 0, 0, 0, 0, seconds) + b"\xff" * 242
     return data
 
 
@@ -214,6 +214,10 @@ class ConvertTest(unittest.TestCase):
         with self.assertRaises(cl.Unsupported) as caught:
             cl.convert(cl.parse_level(with_cell(level_bytes(PLAIN, RECORDS), PLAIN[0], -2)))
         self.assertEqual(str(caught.exception), "Kula cannot show: cell value -2")
+
+    def test_a_start_time_other_than_99_writes_a_time_line(self):
+        self.assertNotIn("time", cl.convert(cl.parse_level(level_bytes(PLAIN, RECORDS))))
+        self.assertTrue(cl.convert(cl.parse_level(level_bytes(PLAIN, RECORDS, seconds=45))).endswith("time 45\n"))
 
     def test_list_counts_every_feature(self):
         records = RECORDS + [(0, (12, 10, 10), {0: (0x25, 0, 2)})]

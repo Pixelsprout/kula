@@ -38,6 +38,9 @@ POSITION_OFFSET = 0xFA
 RECORD_POINTER = 5
 RECORD_LEVEL_FLAGS = 9
 RECORD_LEVEL_SETTINGS = 666
+SETTINGS_START_TIME_OFFSET = 0x0C
+# The original's start time without a settings record, 4950 frames (level_update2.c:347-351). Kula's default too.
+DEFAULT_START_TIME = 99
 
 CELL_NAMES = {-1: "empty", 0: "plain", 1: "fire", 2: "ice", 3: "invisible", 4: "acid"}
 
@@ -276,15 +279,22 @@ def format_list(number, level):
     for title, counts in [("cells", cells), ("records", records), ("objects", objects)]:
         lines.append(f"  {title}:")
         lines += [f"    {name}: {count}" for name, count in sorted(counts.items())]
-    for r in level["records"]:
-        if r["type"] == RECORD_LEVEL_SETTINGS:
-            seconds = struct.unpack_from("<h", r["raw"], 0x0C)[0]
-            lines.append(f"  start time: {seconds} s")
+    seconds = start_time(level)
+    if seconds is not None:
+        lines.append(f"  start time: {seconds} s")
     for r in level["records"]:
         if r["type"] == RECORD_LEVEL_FLAGS:
             hidden, farsighted = level_flags(r)
             lines.append(f"  level flags: hidden {hidden}, farsighted invisible {farsighted}")
     return "\n".join(lines) + "\n"
+
+
+def start_time(level):
+    """Return the start time in seconds from the level settings record, or None without one."""
+    for r in level["records"]:
+        if r["type"] == RECORD_LEVEL_SETTINGS:
+            return struct.unpack_from("<h", r["raw"], SETTINGS_START_TIME_OFFSET)[0]
+    return None
 
 
 def axis_name(v):
@@ -353,7 +363,11 @@ def convert(level):
     if problems:
         names = ", ".join(f"{name} ({count})" if count > 1 else name for name, count in sorted(Counter(problems).items()))
         raise Unsupported(f"Kula cannot show: {names}")
-    return write_text(blocks, items, starts[0])
+    text = write_text(blocks, items, starts[0])
+    seconds = start_time(level)
+    if seconds is not None and seconds != DEFAULT_START_TIME:
+        text += f"time {seconds}\n"
+    return text
 
 
 def write_text(blocks, items, start):

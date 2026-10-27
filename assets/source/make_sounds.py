@@ -35,6 +35,19 @@ def tail(t, length, seconds):
     return 0.5 - 0.5 * math.cos(math.pi * max(left, 0.0) / seconds)
 
 
+# A dry wooden tock for the last 20 s of the level clock: a short high tone
+# with a weaker partial a fifth above, gone in 60 ms. The game sets its gain.
+def tick():
+    length = 0.06
+    samples = []
+    for i in range(int(length * RATE)):
+        t = i / RATE
+        attack = min(t / 0.0005, 1.0)
+        body = math.exp(-t / 0.012) * (math.sin(TAU * 1400.0 * t) + 0.4 * math.sin(TAU * 2100.0 * t))
+        samples.append(0.5 * attack * tail(t, length, 0.01) * body)
+    return samples
+
+
 # A rubber thud: a low tone that drops in pitch as it dies away, with a short
 # soft click of noise where the ball meets the block.
 def bounce():
@@ -80,3 +93,4 @@ folder = os.path.join(ASSETS, "sound")
 os.makedirs(folder, exist_ok=True)
 write(os.path.join(folder, "bounce.wav"), bounce())
 write(os.path.join(folder, "chime.wav"), chime())
+write(os.path.join(folder, "tick.wav"), tick())

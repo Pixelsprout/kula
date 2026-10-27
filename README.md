@@ -216,6 +216,21 @@ Kula copies the original's two scores. See `SPEC.md`, Score.
 - A panel at the bottom shows `Level n` over `Score n`, 30% of the way
   across the window, where the original draws its scores.
 
+## Level clock
+
+Kula copies the original's level clock. See `SPEC.md`, Level clock.
+
+- Each level starts with the time of its `time n` line, or 99 s without one.
+- The clock counts whole steps down. It runs only in `Playing`, so it stops
+  at the exit and in the `Starting` pause.
+- At 0 the level restarts, the same as a fall, and the fall's penalty comes
+  off the total score.
+- A restart sets the clock back to the start time.
+- At 50 s or less, a panel at the top centre shows `Time n`. Its text fades
+  in from black. As in the original, `n` is 1 more than the whole seconds
+  left, so the panel reads `Time 1` in the last second.
+- In the last 20 s, a tick plays each time `n` drops, louder each time.
+
 ## Levels and Themes
 
 `Theme.roc` holds one Theme for each level:
@@ -232,8 +247,8 @@ carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
-   The `kula` pack holds `ball`, `coin`, `sound/bounce` and `sound/chime`,
-   which every level uses.
+   The `kula` pack holds `ball`, `coin`, `sound/bounce`, `sound/chime` and
+   `sound/tick`, which every level uses.
    It never unloads.
 2. When the ball clears a level before the last, Kula sends Load for the
    next level's Theme.
@@ -268,6 +283,7 @@ face of a block. Entries come after the last layer, one on each line:
 |---|---|
 | `x y z face item` | Item `key`, `coin` or `exit` on face `face` of the block at `x y z` |
 | `start x y z face forward` | The ball starts on face `face` of the block at `x y z`, facing `forward` |
+| `time n` | The level clock starts at `n` seconds, 1 or more. At most one line. Without it, the clock starts at 99 s |
 
 A face or a forward is `+x`, `-x`, `+y`, `-y`, `+z` or `-z`. The forward
 must be at right angles to the face. The block must be in the grid. `K` and
@@ -295,7 +311,8 @@ Kula cannot show, and it names each one. The script turns the original
 `(x, y, z)` to Kula's `(x, -z, y)`. The original's `-z` is the up of the
 Hiro start face, so it becomes Kula's `+y`. The turn keeps right-handed
 axes, so the level is not mirrored. The script moves the lowest block to 0
-on each axis.
+on each axis. If the level's start time is not 99 s, the script writes a
+`time n` line.
 
 `python3 -m unittest discover -s scripts` tests the script on a synthetic
 disc image.
@@ -367,13 +384,17 @@ transporters yet; a landing after one must stay silent too.
 lands. `Ball.landed` decides the landing. It returns one `Sound.play` with
 the chime's Sound id for each coin the step collects.
 
+In the last 20 s of the level clock, `step` returns a `Play` of the tick
+with a gain that rises as the time runs out. See Level clock.
+
 | File | What it is |
 |---|---|
 | `assets/sound/bounce.wav` | The bounce, 0.2 s of 16-bit mono at 48 kHz |
 | `assets/sound/chime.wav` | The coin chime, 0.35 s: two bright notes a fifth apart |
+| `assets/sound/tick.wav` | The clock tick, 0.06 s of 16-bit mono at 48 kHz |
 
 `assets/source/make_sounds.py` synthesizes them with the Python standard
-library. It does not copy the original's sound. Run it from this directory
+library. It does not copy the original's sounds. Run it from this directory
 and commit its output:
 
 ```sh

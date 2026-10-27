@@ -3,10 +3,18 @@ import ui.Ui
 import Rules
 import View
 import Ball
+import Clock
 
 Hud := [].{
 	ui : Rules.Model -> List(Element)
-	ui = |model| [bottom_row(model)]
+	ui = |model| [bottom_row(model)].concat(time(model))
+}
+
+# As in the original, the time shows at the top centre from 50 s and fades in from black.
+time : Rules.Model -> List(Element)
+time = |model| match Clock.brightness(model.clock) {
+	Ok(shade) => [Box(Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), [Text({ ..Ui.label("Time ${Clock.shown(model.clock).to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])]
+	Err(Hidden) => []
 }
 
 # The original's screen is 320 pixels wide. It draws the keys at x 16 and the
@@ -56,5 +64,15 @@ expect
 expect
 	match Hud.ui({ ..one_key, score: { ..one_key.score, total: 2500 } }) {
 		[Box(_, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])])] => keys_text.str == "Keys 1 / 2" and level.str == "Level 1000" and total.str == "Score 2500"
+		_ => Bool.False
+	}
+
+expect Hud.ui({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(50) }).len() == 1
+
+# At 45 s the Time panel is a second root at the top centre, a tenth of the way from black.
+expect
+	match Hud.ui({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(45) - 1 }) {
+		[_, Box(time_box, [Text(time_text)])] =>
+			time_box.floating == Float({ attach: CenterTop, offset: { x: 0.0, y: 16.0 } }) and time_text.str == "Time 45" and time_text.color == { r: 0.1, g: 0.1, b: 0.1, a: 1.0 }
 		_ => Bool.False
 	}

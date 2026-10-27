@@ -21,16 +21,17 @@ import Hud
 import Pickup
 import Flash
 import Level
+import Clock
 
 Model : Rules.Model
 
 launch : Config -> Vocabulary.Launch
-launch = |_config| Launch.default
+launch = |_config| { ..Launch.default, step_hz: Clock.step_hz }
 
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat([bounce_sound, chime_sound]) }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat([bounce_sound, chime_sound, tick_sound]) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
@@ -44,6 +45,9 @@ bounce_sound = "sound/bounce"
 chime_sound : Str
 chime_sound = "sound/chime"
 
+tick_sound : Str
+tick_sound = "sound/tick"
+
 load_theme : U64 -> Command
 load_theme = |level_number| {
 	theme = Theme.of_level(level_number)
@@ -56,7 +60,7 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound), chime: Sound.resolve(manifest, chime_sound) }
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound), chime: Sound.resolve(manifest, chime_sound), tick: Sound.resolve(manifest, tick_sound) }
 	} else if model.phase == Cleared and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
@@ -70,7 +74,7 @@ loaded = |model, pack, manifest| {
 step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
-	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
+	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.run_clock, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
@@ -83,7 +87,7 @@ step = |model, input, _results, dt| {
 		[]
 	}
 	unloads = model.unloads.map(|pack| Unload(pack))
-	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)).concat(chimes(model, after)) }
+	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)).concat(chimes(model, after)).concat(tick(model, after)) }
 }
 
 # One chime for each coin the step collected. In a step, only a pickup takes
@@ -101,6 +105,12 @@ bounce = |before, after|
 	} else {
 		[]
 	}
+
+tick : Model, Model -> List(Command)
+tick = |before, after| match Clock.tick(before.clock, after.clock) {
+	Ok(gain) => [Play({ sound: after.tick, gain, pitch: 1.0, at: Here })]
+	Err(NoTick) => []
+}
 
 # forward is held; the others are pressed in this step.
 Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, quit : Bool }
@@ -232,8 +242,8 @@ manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "haze_face", "sky/haze", "sound/bounce", "sound/chime"] }).model
-	loaded(loaded(booted, "kula", manifest([("ball", 4), ("coin", 6), ("sound/bounce", bounce_id), ("sound/chime", chime_id)])), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "haze_face", "sky/haze", "sound/bounce", "sound/chime", "sound/tick"] }).model
+	loaded(loaded(booted, "kula", manifest([("ball", 4), ("coin", 6), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id)])), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
 }
 
 bounce_id : U32
@@ -241,6 +251,9 @@ bounce_id = 65537
 
 chime_id : U32
 chime_id = 65538
+
+tick_id : U32
+tick_id = 65539
 
 idle : Vocabulary.Input
 idle = Input.empty
@@ -261,7 +274,7 @@ lights_in = |scene| scene.nodes.join_map(
 	},
 )
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "sound/bounce", "sound/chime"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "sound/bounce", "sound/chime", "sound/tick"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, coin: 0, sky: 0 }
 expect init({ seed: 0, args: [], assets: [] }).model.bounce == 0 and started.bounce == bounce_id
 expect init({ seed: 0, args: [], assets: [] }).model.chime == 0 and started.chime == chime_id
@@ -640,4 +653,27 @@ expect {
 		},
 	)
 	run.chimes == 1 and run.model.pickups == [] and run.model.score.level == 250 and run.model.ball.pose.cell == { x: 0, y: 1, z: 1 }
+}
+
+expect launch({ seed: 0, args: [], assets: [] }).step_hz == 120
+expect started.tick == tick_id
+
+# In the last 20 s the clock ticks once a second, louder each time.
+expect {
+	first = step({ ..started, clock: Clock.start(20) + 1 }, idle, QueryResults.empty, 0.01)
+	second = step(first.model, idle, QueryResults.empty, 0.01)
+	first.commands == [] and second.commands == [Play({ sound: tick_id, gain: 510.0 / 7000.0, pitch: 1.0, at: Here })]
+}
+
+# The clock stops at the exit, so the tick stops too.
+expect {
+	open = { ..at_pose(started, before_exit), keys_left: 0, clock: Clock.start(5) + 1 }
+	finished = step(open, up_held, QueryResults.empty, 0.1).model
+	finished.phase == Cleared and finished.clock == Clock.start(5) and step(finished, idle, QueryResults.empty, 0.1).commands == []
+}
+
+# At 0 the level restarts, with no tick.
+expect {
+	last_step = step({ ..started, clock: 1 }, up_held, QueryResults.empty, 0.01)
+	last_step.model == started and last_step.commands == []
 }

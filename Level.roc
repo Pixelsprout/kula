@@ -2,6 +2,7 @@ import "levels/level1.txt" as level1 : Str
 import "levels/level2.txt" as level2 : Str
 import "levels/level3.txt" as level3 : Str
 import World
+import Clock
 import Grid
 
 Level := [].{
@@ -15,13 +16,16 @@ Level := [].{
 	# Layers run bottom first, with a blank line between. Row index is z,
 	# column index is x and layer index is y. A line with a space is an entry:
 	# `x y z face item` or `start x y z face forward`, where x y z is a block.
-	# RaggedRow, BadEntry and NoBlock carry the line number, counted from 1.
+	# A `time n` line sets the start time to n seconds. Without it, the time is
+	# Clock.default_seconds. RaggedRow, BadEntry and NoBlock carry the line
+	# number, counted from 1.
 	parse : Str -> Try(World.Level, [RaggedRow(U64), UnknownChar(Str), NoStart, TwoStarts, BadEntry(U64), NoBlock(U64)])
 	parse = |source| {
 		var $blocks = Set.empty()
 		var $items = []
 		var $starts = []
 		var $entries = []
+		var $time = Err(NoTime)
 		var $width = 0
 		var $line_number = 0
 		var $y = 0
@@ -36,11 +40,15 @@ Level := [].{
 					$z = 0
 				}
 			} else if bytes.contains(' ') {
-				match entry(line) {
-					Ok(e) => {
+				match (entry(line), $time) {
+					(Ok(Time(seconds)), Err(NoTime)) => {
+						$time = Ok(seconds)
+					}
+					(Ok(Time(_)), Ok(_)) => return Err(BadEntry($line_number))
+					(Ok(OnBlock(e)), _) => {
 						$entries = $entries.append({ line: $line_number, entry: e })
 					}
-					Err(Bad) => return Err(BadEntry($line_number))
+					(Err(Bad), _) => return Err(BadEntry($line_number))
 				}
 			} else {
 				if $width == 0 {
@@ -89,7 +97,7 @@ Level := [].{
 		}
 		match $starts {
 			[] => Err(NoStart)
-			[start] => Ok({ blocks: $blocks, items: $items, start })
+			[start] => Ok({ blocks: $blocks, items: $items, start, time: $time ?? Clock.default_seconds })
 			_ => Err(TwoStarts)
 		}
 	}
@@ -113,16 +121,25 @@ tile = |byte| match byte {
 
 Entry : { block : World.Cell, face : World.Cell, kind : [Item(World.Item), StartFacing(World.Cell)] }
 
-entry : Str -> Try(Entry, [Bad])
+# A start time of 0 would end the level in its first step.
+entry : Str -> Try([OnBlock(Entry), Time(U64)], [Bad])
 entry = |line| {
 	parts = Str.split_on(line, " ").keep_if(|part| part != "")
 	match parts {
+		["time", seconds] => {
+			n = parse_signed_int(seconds)?.to_u64_try().map_err(|_| Bad)?
+			if n > 0 {
+				Ok(Time(n))
+			} else {
+				Err(Bad)
+			}
+		}
 		["start", x, y, z, face_name, forward_name] => {
 			block = parse_cell(x, y, z)?
 			face = axis(face_name)?
 			forward = axis(forward_name)?
 			if Grid.dot(face, forward) == 0 {
-				Ok({ block, face, kind: StartFacing(forward) })
+				Ok(OnBlock({ block, face, kind: StartFacing(forward) }))
 			} else {
 				Err(Bad)
 			}
@@ -136,7 +153,7 @@ entry = |line| {
 				"exit" => Ok(Exit)
 				_ => Err(Bad)
 			}?
-			Ok({ block, face, kind: Item(item) })
+			Ok(OnBlock({ block, face, kind: Item(item) }))
 		}
 		_ => Err(Bad)
 	}
@@ -220,7 +237,7 @@ expect Level.parse("#S\n##\n\n..\n.") == Err(RaggedRow(5))
 expect Level.parse("#S\n#x") == Err(UnknownChar("x"))
 expect Level.parse("##\n##") == Err(NoStart)
 expect Level.parse("#S\nS#") == Err(TwoStarts)
-expect Level.parse("..\n\nS.\n") == Ok({ blocks: Set.from_list([cell(0, 1, 0)]), items: [], start: { cell: cell(0, 2, 0), up: cell(0, 1, 0), forward: cell(0, 0, -1) } })
+expect Level.parse("..\n\nS.\n") == Ok({ blocks: Set.from_list([cell(0, 1, 0)]), items: [], start: { cell: cell(0, 2, 0), up: cell(0, 1, 0), forward: cell(0, 0, -1) }, time: 99 })
 
 # Entries put items and the start on any face, with any forward.
 expect {
@@ -234,6 +251,7 @@ expect {
 				{ cell: cell(0, 1, 1), up: cell(0, 0, 1), item: Key },
 			],
 			start: { cell: cell(2, 0, 0), up: cell(1, 0, 0), forward: cell(0, 1, 0) },
+			time: 99,
 		})
 }
 
@@ -261,6 +279,15 @@ expect Level.parse("##\n\n0 0 0 +y key extra\n") == Err(BadEntry(3))
 expect Level.parse("##\n\n5 0 0 +y key\nstart 0 0 0 +y -z\n") == Err(NoBlock(3))
 expect Level.parse("##\n\nstart 0 -1 0 +y -z\n") == Err(NoBlock(3))
 expect parse_signed_int("-12") == Ok(-12) and parse_signed_int("034") == Ok(34) and parse_signed_int("-") == Err(Bad) and parse_signed_int("") == Err(Bad) and parse_signed_int("1234567") == Err(Bad)
+
+# A time line sets the start time. It may come anywhere among the entries, once.
+expect Level.parse("S\n\ntime 45\n").map_ok(|l| l.time) == Ok(45)
+expect Level.parse("time 45\nS\n").map_ok(|l| l.time) == Ok(45)
+expect Level.parse("S\n\ntime 45\ntime 30\n") == Err(BadEntry(4))
+expect Level.parse("S\n\ntime 0\n") == Err(BadEntry(3))
+expect Level.parse("S\n\ntime -5\n") == Err(BadEntry(3))
+expect Level.parse("S\n\ntime\n") == Err(RaggedRow(3))
+expect Level.parse("S\n\ntime 4 5\n") == Err(BadEntry(3))
 
 expect Level.count == 3
 expect Level.parse(Level.text(4)) == Err(NoStart)
