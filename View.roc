@@ -42,6 +42,18 @@ View := [].{
 		}
 	}
 
+	# The centre rests one radius above the face. Round an edge it follows the
+	# original's path: half a cell to the edge, a quarter circle of one radius
+	# about the edge line, then half a cell down the side. The idle bob does not move it.
+	centre : Ball.Ball -> Vec3.Vec3
+	centre = |ball| match ball.motion {
+		Rolling({ from, t }) if Ball.roll_kind(from, ball.pose) == Edge => edge_centre(from, t)
+		_ => {
+			placed = View.interpolated(ball)
+			Vec3.sub(placed.pos, Vec3.scale(placed.up, 0.5 - Ball.radius))
+		}
+	}
+
 	# The idle bob squashes the ball along up, not along a spinning model axis.
 	# The centre drops as the ball squashes, so its bottom stays on the floor.
 	ball_draw : Ball.Ball, U32, Rgb -> Vocabulary.Draw
@@ -141,18 +153,6 @@ pi = 3.1415927
 # The original's peak bob, 200 of 4096. See SPEC.md.
 bob_amount : F32
 bob_amount = 200.0 / 4096.0
-
-# The centre rests one radius above the face. Round an edge it follows the
-# original's path: half a cell to the edge, a quarter circle of one radius
-# about the edge line, then half a cell down the side.
-centre : Ball.Ball -> Vec3.Vec3
-centre = |ball| match ball.motion {
-	Rolling({ from, t }) if Ball.roll_kind(from, ball.pose) == Edge => edge_centre(from, t)
-	_ => {
-		placed = View.interpolated(ball)
-		Vec3.sub(placed.pos, Vec3.scale(placed.up, 0.5 - Ball.radius))
-	}
-}
 
 edge_centre : World.Pose, F32 -> Vec3.Vec3
 edge_centre = |from, t| {
