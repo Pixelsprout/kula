@@ -7,8 +7,8 @@ import Ball
 Hud := [].{
 	ui : Rules.Model -> List(Element)
 	ui = |model| {
-		collected = model.collected.len()
-		total = model.keys_left + collected
+		total = model.level.items.keep_if(|entry| entry.item == Key).len()
+		collected = total - model.keys_left
 		[Box(Ui.panel(LeftTop, { x: 16.0, y: 16.0 }), [Text(Ui.label("Keys ${collected.to_str()} / ${total.to_str()}"))])]
 	}
 }

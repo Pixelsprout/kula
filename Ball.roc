@@ -158,7 +158,7 @@ Ball := [].{
 		moved = move(ball, dt, Held)
 		match (moved.motion, moved.turn) {
 			(Still, Steady) if ball.motion != Still => {
-				# One roll at most, so Rules.collect sees every committed cell.
+				# One roll at most, so a long step cannot chain rolls past a pickup.
 				busy = seconds_left(ball)
 				turning = turn_seconds_left(ball)
 				left_over = dt - (

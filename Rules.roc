@@ -1,15 +1,17 @@
 import World
 import Level
 import Ball
+import Pickup
+import View
 
 Rules := [].{
 	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
 	Phase : [Playing, Cleared, Starting(F32), Won]
 
-	# collected holds the cell and up of each key taken so far. The Level keeps every item.
+	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
 	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, collected : Set({ cell : World.Cell, up : World.Cell }), unloads : List(Str) }
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
@@ -33,16 +35,21 @@ Rules := [].{
 		_ => model
 	}
 
-	# Runs every step, so a key collects as soon as the move onto its cell commits.
+	move_pickups : F32 -> (Model -> Model)
+	move_pickups = |dt| |model| { ..model, pickups: model.pickups.map(|pickup| Pickup.advance(pickup, dt)) }
+
+	# As in the original, every step tests each pickup against the ball centre
+	# while the player has control. So a pickup can happen at any point of a move.
 	collect : Model -> Model
-	collect = |model| {
-		spot = { cell: model.ball.pose.cell, up: model.ball.pose.up }
-		if has_item(model.level, model.ball.pose, Key) and !model.collected.contains(spot) {
-			{ ..model, collected: model.collected.insert(spot), keys_left: model.keys_left - 1 }
+	collect = |model|
+		if model.phase == Playing {
+			centre = View.centre(model.ball)
+			taken = model.pickups.keep_if(|pickup| Pickup.touches(pickup, centre))
+			keys = taken.keep_if(|pickup| pickup.kind == Key).len()
+			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys }
 		} else {
 			model
 		}
-	}
 
 	exit_open : Model -> Bool
 	exit_open = |model| model.keys_left == 0
@@ -79,8 +86,9 @@ parse_or_crash = |text| match Level.parse(text) {
 
 start_on : World.Meshes, U64, World.Level -> Rules.Model
 start_on = |meshes, level_number, level| {
-	keys = level.items.keep_if(|entry| entry.item == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, collected: Set.empty(), unloads: [] }
+	pickups = Pickup.from_level(level)
+	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -107,12 +115,12 @@ exit_cell = cell(0, 1, 0)
 
 expect {
 	model = Rules.start(meshes, 1)
-	model.keys_left == 2 and model.phase == Playing and model.collected.len() == 0 and !Rules.exit_open(model)
+	model.keys_left == 2 and model.phase == Playing and model.pickups.len() == 2 and !Rules.exit_open(model)
 }
 
 expect {
 	model = Rules.collect(at(Rules.start(meshes, 1), first_key))
-	model.keys_left == 1 and model.collected.contains({ cell: first_key, up: cell(0, 1, 0) })
+	model.keys_left == 1 and model.pickups.map(|pickup| pickup.cell) == [second_key]
 }
 
 # Standing on a collected key does not count it twice.
@@ -187,7 +195,7 @@ on_face = |model, up| { ..model, ball: Ball.start({ cell: cell(0, 1, 0), up, for
 expect {
 	floor = Rules.collect(on_face(two_faces("key"), cell(0, 1, 0)))
 	both = Rules.collect(on_face(floor, cell(-1, 0, 0)))
-	floor.keys_left == 1 and both.keys_left == 0 and both.collected.len() == 2 and Rules.collect(on_face(both, cell(0, 1, 0))).keys_left == 0
+	floor.keys_left == 1 and both.keys_left == 0 and both.pickups.len() == 0 and Rules.collect(on_face(both, cell(0, 1, 0))).keys_left == 0
 }
 
 expect {
@@ -196,3 +204,33 @@ expect {
 }
 
 expect Rules.collect(on_face(two_faces("exit"), cell(-1, 0, 0))).keys_left == 1
+
+# Without control the ball collects nothing.
+expect {
+	on_key = at(Rules.start(meshes, 1), first_key)
+	[Cleared, Starting(0.5), Won].all(|phase| Rules.collect({ ..on_key, phase }).keys_left == 2)
+}
+
+# A forward jump from z 2 to z 0, with a key on the wall beside z 1 or on the floor of z 1.
+jump_past : Str -> Rules.Model
+jump_past = |key| start_on(meshes, 1, parse_or_crash("#.\n#.\n#.\n\n..\n.#\n..\n\n${key}\nstart 0 0 2 +y -z\n"))
+
+jump : Rules.Model -> Rules.Model
+jump = |model| { ..model, ball: Ball.act(model.level.blocks, model.ball, Jump({ up_held: True })) }
+
+# The ball passes the wall key at the top of the jump and collects it in the air.
+expect {
+	model = jump(jump_past("1 1 1 -x key"))
+	top = Rules.collect({ ..model, ball: Ball.advance(model.ball, 0.27) })
+	top.keys_left == 0 and match top.ball.motion {
+		Jumping(_) => True
+		_ => False
+	}
+}
+
+# The ball passes half a cell over the floor key, out of its reach, so the key stays.
+expect {
+	model = jump(jump_past("0 0 1 +y key"))
+	landed = List.repeat(0.01, 60).fold(model, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
+	landed.ball.motion == Still and landed.ball.pose.cell == cell(0, 1, 0) and landed.keys_left == 1
+}

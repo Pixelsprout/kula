@@ -18,6 +18,7 @@ import Rules
 import View
 import Theme
 import Hud
+import Pickup
 
 Model : Rules.Model
 
@@ -64,7 +65,7 @@ loaded = |model, pack, manifest| {
 step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
-	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.collect, Rules.exit, Rules.fall]
+	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
@@ -161,12 +162,7 @@ view = |model| {
 				View.face_draw(entry.id, model.meshes.face, entry.face, tint)
 			},
 		)
-	# Ids come before the collected filter too, so a key keeps its id.
-	keys = model.level.items
-		.keep_if(|entry| entry.item == Key)
-		.map_with_index(|entry, i| { cell: entry.cell, up: entry.up, id: key_ids + i.to_u64() })
-		.keep_if(|key| !model.collected.contains({ cell: key.cell, up: key.up }))
-		.map(|key| cube(model.meshes, key.id, key.cell, 0.3, key_tint))
+	pickups = model.pickups.map(|pickup| pickup_draw(model.meshes, pickup))
 	ball_tint = if model.phase == Won {
 		won_ball_tint
 	} else {
@@ -174,13 +170,13 @@ view = |model| {
 	}
 	ball = View.ball_draw(model.ball, model.meshes.ball, ball_tint)
 	lights = theme.lights.map(|light| Light(light))
-	draws = blocks.concat(keys).append(ball).map(|draw| Draw(draw))
+	draws = blocks.concat(pickups).append(ball).map(|draw| Draw(draw))
 	{ ..Scene.empty, camera, nodes: lights.concat(draws), sky: model.meshes.sky, ui: Hud.ui(model) }
 }
 
-# Face draw ids count up from 1, so the key ids start well past any level's faces.
-key_ids : U64
-key_ids = 100_000
+# Face draw ids count up from 1, so the pickup ids start well past any level's faces.
+pickup_ids : U64
+pickup_ids = 100_000
 
 closed_exit_tint : Rgb
 closed_exit_tint = { r: 0.6, g: 0.15, b: 0.15 }
@@ -202,8 +198,16 @@ playing_ball_tint = { r: 1.0, g: 1.0, b: 1.0 }
 won_ball_tint : Rgb
 won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 
-cube : World.Meshes, U64, World.Cell, F32, Rgb -> Vocabulary.Draw
-cube = |meshes, id, cell, size, tint| { ..Draw.default, id, mesh: meshes.cube, pos: Grid.to_vec3(cell), scale: Vec3.scale(Vec3.one, size), tint }
+key_size : F32
+key_size = 0.3
+
+pickup_draw : World.Meshes, Pickup.Pickup -> Vocabulary.Draw
+pickup_draw = |meshes, pickup| {
+	look = match pickup.kind {
+		Key => { mesh: meshes.cube, size: key_size, tint: key_tint }
+	}
+	{ ..Draw.default, id: pickup_ids + pickup.id, mesh: look.mesh, pos: Pickup.centre(pickup), rot: Pickup.rot(pickup), scale: Vec3.scale(Vec3.one, look.size), tint: look.tint }
+}
 
 manifest : List((Str, U32)) -> Manifest
 manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: [] })
@@ -301,10 +305,21 @@ expect {
 	exit_faces.len() == 5 and exit_faces.all(|d| Vec3.length(d.pos) == 0.5)
 }
 
+# Each key bobs 120 to 160 units above its face.
 expect {
-	draws = draws_in(view(started))
-	keys = draws.keep_if(|d| d.tint == key_tint)
-	keys.map(|d| d.pos) == [{ x: 0.0, y: 1.0, z: 7.0 }, { x: 0.0, y: 2.0, z: 5.0 }] and keys.all(|d| d.scale.x == 0.3)
+	keys = draws_in(view(started)).keep_if(|d| d.tint == key_tint)
+	above = |d, face_y| d.pos.y - face_y >= 120.0 / 512.0 and d.pos.y - face_y <= 160.0 / 512.0
+	match keys {
+		[first, second] => first.pos.z == 7.0 and above(first, 0.5) and second.pos.z == 5.0 and above(second, 1.5) and keys.all(|d| d.pos.x == 0.0 and d.scale.x == key_size)
+		_ => False
+	}
+}
+
+# A key moves between steps.
+expect {
+	keys_at = |model| draws_in(view(model)).keep_if(|d| d.tint == key_tint)
+	later = step(started, idle, QueryResults.empty, 0.1).model
+	keys_at(later).map(|d| d.id) == keys_at(started).map(|d| d.id) and keys_at(later).map(|d| d.pos) != keys_at(started).map(|d| d.pos) and keys_at(later).map(|d| d.rot) != keys_at(started).map(|d| d.rot)
 }
 
 expect {
@@ -329,7 +344,19 @@ expect {
 # Rolling from S over the first key collects it.
 expect {
 	model = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
-	model.keys_left == 1 and model.collected.contains({ cell: { x: 0, y: 1, z: 7 }, up: { x: 0, y: 1, z: 0 } })
+	model.keys_left == 1 and model.pickups.map(|pickup| pickup.id) == [1]
+}
+
+# The key collects in the roll onto its cell, before the roll ends.
+expect {
+	before_key = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 8 } })
+	rolling = step(before_key, up_held, QueryResults.empty, 0.01).model
+	near = step(rolling, idle, QueryResults.empty, 0.1).model
+	nearer = step(near, idle, QueryResults.empty, 0.1).model
+	near.keys_left == 2 and nearer.keys_left == 1 and match nearer.ball.motion {
+		Rolling(_) => True
+		_ => False
+	}
 }
 
 at_pose : Model, World.Pose -> Model
@@ -364,7 +391,7 @@ expect {
 expect {
 	collected = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
 	keys = draws_in(view(collected)).keep_if(|d| d.tint == key_tint)
-	keys.map(|d| d.pos) == [{ x: 0.0, y: 2.0, z: 5.0 }] and keys.map(|d| d.id) == [key_ids + 1]
+	keys.map(|d| d.pos.z) == [5.0] and keys.map(|d| d.id) == [pickup_ids + 1]
 }
 
 expect {
@@ -397,12 +424,13 @@ expect {
 	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and jumped.ball.motion == Jumping({ from: before_gap.ball.pose, offset: 0.0, t: 0.1 / 0.54 })
 }
 
-# A key in the roll's target cell is collected, though the jump starts from the cell behind it.
+# A jump just after a roll starts passes high over the key in the roll's target cell, so the key stays.
 expect {
 	on_layer1 = at_pose(started, { ..started.level.start, cell: { x: 0, y: 2, z: 6 } })
 	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
 	jumped = step(rolling, space, QueryResults.empty, 0.01).model
-	jumped.collected.contains({ cell: { x: 0, y: 2, z: 5 }, up: { x: 0, y: 1, z: 0 } }) and jumped.keys_left == 1 and match jumped.ball.motion {
+	landed = List.repeat(0.01, 100).fold(jumped, |m, dt| step(m, idle, QueryResults.empty, dt).model)
+	landed.ball.motion == Still and landed.keys_left == 2 and match jumped.ball.motion {
 		Falling({ from, .. }) => from.cell == { x: 0, y: 2, z: 6 }
 		_ => False
 	}
