@@ -146,7 +146,7 @@ A jump takes 0.54 s and rises half a cell. There are two kinds.
 **Jump in place.** Space while the ball is still and Up is not held. The
 ball rises and lands on the same cell. Left and Right turn the ball in the
 air. The turn can last longer than the jump. A block above the ball bounces
-the jump: the ball does not move.
+the jump: the ball hits the block, drops back and lands on its cell.
 
 **Forward jump.** Space while Up is held, Space during a floor roll, or
 Space during an edge roll before the ball reaches the edge. The jump aims
@@ -155,7 +155,10 @@ from where the ball is. It aims two cells past the cell the ball is nearest
 to. No input acts during a forward jump.
 
 - If a block is above the ball, or in either of the two cells ahead, the
-  jump bounces. A still ball does not move. A rolling ball rolls on.
+  jump bounces. The ball hits the block and drops back onto the cell
+  nearest the hit: its own cell for a block above or one ahead, the cell
+  between for a block two ahead. With no block under that cell, it falls
+  on.
 - If a block is under the landing cell, the ball lands there.
 - If no block is under the landing cell, the ball falls.
 
@@ -164,6 +167,8 @@ never lands on top of the block ahead. To get onto a wall, roll into it.
 
 The ball can land only in the last 11 of the jump's 27 frames. On level
 ground it lands when the jump ends.
+
+Each landing on a block squashes the ball for 0.54 s, as in the original.
 
 ### Fall and restart
 
@@ -416,17 +421,20 @@ outputs. The build does not run Blender.
 
 ## Sound
 
-The ball bounces with a short thud when it lands from a forward jump or
-from a fall onto a block. A jump in place, a roll and a fall off the level
-make no sound. As in the original, the ball is silent when the player has
-no control, so a landing in `Cleared` or `Won` makes no sound. Kula has no
-transporters yet; a landing after one must stay silent too.
+The ball bounces with a short thud when it lands on a block: from a
+forward jump, a jump in place, a fall or a bounce. It thuds too when a jump
+hits a wall or a ceiling, so a blocked jump thuds twice. A roll and a fall
+off the level make no sound. As in the original, a landing is silent when
+the player has no control, so a landing in `Cleared` or `Won` makes no
+sound, but a hit always thuds. Kula has no transporters yet; a landing after
+one must stay silent too.
 
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
-lands. `Ball.landed` decides the landing. It returns one `Sound.play` with
-the chime's Sound id for each coin the step collects, and one with the
-jingle's Sound id for each fruit. Each key plays the key sound. The key that
-leaves no keys plays the last-key sound alone, as in the original.
+lands and in the step it hits. `Ball.landed` and `Ball.hit` decide them. It
+returns one `Sound.play` with the chime's Sound id for each coin the step
+collects, and one with the jingle's Sound id for each fruit. Each key plays
+the key sound. The key that leaves no keys plays the last-key sound alone, as
+in the original.
 
 In the last 20 s of the level clock, `step` returns a `Play` of the tick
 with a gain that rises as the time runs out. See Level clock.

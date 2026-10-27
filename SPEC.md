@@ -60,10 +60,28 @@ PAL frames. The bob amount `s` is `rsin(phase) * 200 / 4096`, from -200 to 200.
 | Clock changes | The phase carries on, so a rate change has no jump. A Timer pause face stops the clock and holds the rate (`SubtractLevelTimer`). An hourglass flips the time left and changes the rate at once (`level_update3.c:311`) | Code | The clone has a level clock (see Level clock), but the bob does not read it yet. The rate does not change |
 | When it runs | Every frame except in a forward jump (`:930-934`). It also stops while `turningWhere` is not 0: each frame of the edge wrap, and one frame as a turn or a climb starts | Code | Every step except a forward jump, the arc of a fall and the edge wrap. A turn or a climb does not stop it |
 | In a forward jump | The shape holds its last value. The jump stretch acts through `flattenFactor` | Code | The bob phase holds |
-| Landing squish | Adds to `s`. While it runs, the phase stops and the bob holds its value | Code | Task `42fsutrf` |
+| Landing squish | Adds to `s`. While it runs, the phase stops and the bob holds its value | Code | Same. See Landing squish |
 
 The ball's `rot` is its spin. The clone sets the Draw's `scale_rot` so the
 scale acts along up whatever the spin (rocco-engine `docs/adr/0002-a-scale-acts-along-its-own-axes.md`).
+
+### Landing squish
+
+Each touch-down on a block starts a 4-frame squish (Code):
+`CheckIfPlayerLanded` (`src/player_movement.c:798-803`), the end of a jump
+in place (`:497-500`) and a moving platform (`SetLandingSquishVars`,
+`src/level_update.c:306, 365`). `SetBallShapeAndRotationWhenRollingOrIdle`
+(`:1254-1271`) adds the squish to the bob amount `s`, so it acts through
+`ballMorphMatrix` like the bob.
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| Rise | Up by 187 a frame for 4 frames, to 748/4096 (`:1254-1257`) | Code | Same, linear between frames. At the peak the ball is 18% wider across up and 37% shorter along up |
+| Fall | The step down starts at 90 and drops by 10 a frame, down to 20 (`:1258-1266`). The squish is 0 at frame 27 | Code | Same. `Ball.squash` is 0 from 0.54 s after the contact |
+| Contact frame | The landing sets the counter before the draw of the same frame, so the contact frame shows 187 | Inferred | The contact step shows 187/4096 |
+| Bob | The phase stops and the bob amount holds while the squish runs (`:1258-1270`) | Code | The bob phase holds until the squish ends |
+| New landing | A new touch-down starts the squish again from 0 | Code | Same |
+| Which landings | A forward jump, a fall, a jump in place, a bounce and a moving platform | Code | All but the moving platform, which Kula does not have |
 
 ## Moves
 
@@ -131,15 +149,49 @@ copies this for every turn.
 | Jump in place | Same curve with only the vertical part. Lands on the same cell (`ProcessMovement`, `JUMPING_INPLACE`) | Code | `JumpingInPlace`: same duration and peak as the forward jump |
 | Turn in mid-air | Forward jump: no input acts. Jump in place: L and R still turn the ball | Code | Same. The turn takes 0.32 s and can outlast the jump |
 | No floor there | The jump ends, then the ball falls straight down. Gravity adds 6 units a frame to the fall speed, up to 80. It lands on the first block below (`CheckIfPlayerLanded`). The level ends only when the ball leaves the grid, -1 to 35 on each axis (`ProcessEnemiesRenderItemsAndCheckFellOff`) | Code | `Falling`: the jump arc, then a drop at 29.3 cells/s², up to 7.8 cells/s. The drop starts at the arc's end speed. It lands on the first block below. With no block below, the level restarts 2 cells past the lowest block along gravity |
-| A block in the path | Forward jump only. Past 412/512 of its cell, a block ahead at the ball's height bounces it back and it falls (`CheckForPlayerWallHit`) | Code | Forward jump only. `Bounce` when a block sits one or two cells ahead. The ball does not jump |
-| A block above | Both kinds. A rising ball at height 412 or more under a block bounces down and falls (`CheckPlayerHitCeiling`) | Code | Both kinds. `Bounce` before the jump starts |
+| A block in the path | Forward jump only. Past 412/512 of its cell, a block ahead at the ball's height bounces it back and it falls (`CheckForPlayerWallHit`) | Code | Forward jump only, for a block one or two cells ahead. See Bounce |
+| A block above | Both kinds. A rising ball at height 412 or more under a block bounces down and falls (`CheckPlayerHitCeiling`) | Code | Both kinds, for a block above the cell the jump starts from. See Bounce |
 | Landing window | The last 11 frames of the jump can land (`CheckPlayerJumpingStuff`) | Code | Same (`Ball.can_land`, t >= 16/27). The ball lands when its centre is at or below rest height over a floor. On level ground this is the end of the jump |
 | After landing | Up held keeps the ball rolling at full speed (`CheckIfPlayerLanded`) | Code | Same. With Up held, the next roll starts in the step the jump lands and gets the time left over. A roll that ends with Up held does the same |
 | Duration | 27 frames | Reported, wiki.kula.quest. The frame count is in GGI data (`ggiPart5JumpAnimData`), not in the C code | 0.54 s |
-| Peak height | In GGI data | | 0.5 cell |
+| Peak height | In GGI data. The Roll Away (US) jump in `HIRO.GGI` peaks 458 units above rest | Inferred, from the disc's GGI data | 0.5 cell |
 
 A jump never lands on top of the block ahead. The only way onto a wall is
 to roll into it.
+
+### Bounce
+
+A wall hit or a ceiling hit turns the jump into a fall
+(`src/player_movement.c`, Code). The ball then lands as from any fall.
+The clone keeps its grid: it lands on a cell centre.
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| Wall contact | When the ball centre is 412 of 512 units into its cell and a block is ahead at the ball's height (`CheckForPlayerWallHit`, `:662-712`) | Code | When the centre is one radius short of the wall face: 0.082 s into the jump for a wall one ahead, 0.352 s for two ahead, from a still ball |
+| Wall rebound | The ball moves back by 2 frames of its forward speed (`:699-701`), then moves back at that speed. The back speed drops by 7 units a frame to 0 (`:431-436`, PAL). A ball that was rising starts to drop at 10 units a frame, else at 0 (`:703-705`). Gravity then adds 6 a frame (`:438`) | Code | Same speeds, in cells and seconds (`rebound` in `Ball.roc`) |
+| Ceiling contact | When the ball centre is 412 units into its cell, 312 above rest, under a block (`CheckPlayerHitCeiling`, `:724-757`) | Code | Kula's jump peaks at 0.5 cell, under the 0.61 cell that a contact needs. The clone hits at 312/458 of its peak, as the Roll Away jump does at frame 6: 0.118 s in |
+| Ceiling rebound | The ball moves down by 2 frames of its rising speed and drops at that speed. The forward motion stops (`:742-752`) | Code | Same speeds |
+| Where it lands | Where the fall ends. The speeds take a ball back about to the centre of the cell before the wall | Inferred | On the centre of the cell nearest the contact, which it reaches as it lands. Off a wall one ahead or a ceiling, that is its own cell. Off a wall two ahead, the cell between. With no block under that cell, the ball falls on |
+| Duration | | | From a still ball: 0.186 s for a wall one ahead, 0.528 s for two ahead, 0.197 s for a ceiling |
+| Spin | The hit sets `rotX` to 0. The fall rule then adds 6 a frame while Up is held (`:707, 747, 414-424`) | Code | The spin stops at the hit. Up does not start it again |
+| Input | A jump in place can turn until the ceiling hit | Code | No input acts during a bounce |
+
+### Bounce sound
+
+Every bounce plays `SFX_BALL_BOUNCE` (102, `include/common.h:90`) at volume
+7000, not placed in 3D (Code). It starts in the frame of the contact. The
+clone plays `sound/bounce` at gain 1 in the step of the contact. A blocked
+jump bounces twice: at the hit and at the landing.
+
+| Event | Original | Label | Clone |
+|---|---|---|---|
+| Forward jump lands | `CheckIfPlayerLanded` (`player_movement.c:764-781`), only with control, not paused and not after a transporter | Code | `Ball.landed`, only in `Playing` |
+| Fall lands | The same, from the `FALLING` case of `CheckPlayerJumpingStuff` (`:626`) | Code | Same. A fall off the level is silent |
+| Jump in place lands | `ProcessMovement`, `JUMPING_INPLACE` (`:495-500`). No control check | Code | `Ball.landed`, only in `Playing`. Kula has no jump in place outside `Playing` |
+| Wall hit | `CheckForPlayerWallHit` (`:693`). No control check | Code | `Ball.hit`, in any phase while the level stays the same |
+| Ceiling hit | `CheckPlayerHitCeiling` (`:739`). No control check | Code | Same |
+| Moving platform | `HandleMovingPlatforms` (`level_update.c:276, 314`) | Code | Kula has no moving platforms |
+| Roll, climb, edge roll, turn | No sound | Code | Same |
 
 ### Long jump
 
@@ -364,6 +416,8 @@ the banked total shows in `Cleared` and `Won`.
 - The lens flare and the motion blur on fast turns.
 - Fog.
 - The long jump, the Bouncy pill, bounce pads and the boost.
+- The pad rumble on a hit or a hard landing, and the screen shake of a
+  landing at top fall speed (`player_movement.c:694, 740, 782-785`).
 - Gold and silver coins. Hiro levels 1 to 3 hold only bronze coins.
 - The hourglass in the HUD, the hourglass item, Timer pause faces and the
   time-out screen.

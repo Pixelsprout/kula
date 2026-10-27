@@ -5,13 +5,26 @@ import Grid
 
 Ball := [].{
 	# bob is the phase of the idle bob, in turns from 0 to 1.
-	Ball : { pose : World.Pose, motion : Motion, turn : Turn, rot : Quat.Quat, bob : F32 }
+	Ball : { pose : World.Pose, motion : Motion, turn : Turn, rot : Quat.Quat, bob : F32, squish : Squish }
+
+	# Seconds since the ball touched down, while the landing squish runs.
+	Squish : [Settled, Squashing(F32)]
 
 	# The pose commits when a move starts. from, offset, over and t only serve Ball.interpolated.
 	# A jump from a roll starts offset cells along forward from from.cell.
 	# A fall jumps to over, then drops straight down. Its seconds count from the jump start.
 	# spin_rate is in radians a second. It plays the part of the original's rotX.
-	Motion : [Still, Rolling({ from : World.Pose, t : F32 }), Jumping({ from : World.Pose, offset : F32, t : F32 }), JumpingInPlace({ t : F32 }), Falling({ from : World.Pose, offset : F32, over : World.Pose, drop : Drop, seconds : F32, spin_rate : F32 })]
+	# A bounce follows the jump arc toward to until it hits, then drops back onto over.
+	# A bounce from a jump in place has to equal to from. Its seconds count from the jump start.
+	Motion : [Still, Rolling({ from : World.Pose, t : F32 }), Jumping({ from : World.Pose, offset : F32, t : F32 }), JumpingInPlace({ t : F32 }), Falling({ from : World.Pose, offset : F32, over : World.Pose, drop : Drop, seconds : F32, spin_rate : F32 }), Bouncing(Bounce)]
+
+	Bounce : { from : World.Pose, offset : F32, to : World.Pose, hit : Hit, over : World.Pose, drop : Drop, seconds : F32 }
+
+	# The jump's t at the contact.
+	Hit : [Wall(F32), Ceiling(F32)]
+
+	# A wall is 1 or 2 cells ahead at the ball's level.
+	Obstacle : [Ceiling, Wall(I32)]
 
 	# Cells the ball drops below over. Off drops to 2 cells past the lowest block, then the level restarts.
 	Drop : [Onto(I32), Off(I32)]
@@ -30,7 +43,7 @@ Ball := [].{
 	radius = 0.195
 
 	start : World.Pose -> Ball.Ball
-	start = |pose| { pose, motion: Still, turn: Steady, rot: Quat.identity, bob: 0.0 }
+	start = |pose| { pose, motion: Still, turn: Steady, rot: Quat.identity, bob: 0.0, squish: Settled }
 
 	# An edge roll needs an open end, as in the original.
 	roll : Set(World.Cell), World.Pose -> Try(World.Pose, [ClosedEdge])
@@ -76,13 +89,26 @@ Ball := [].{
 	turn_right : World.Pose -> World.Pose
 	turn_right = |pose| { ..pose, forward: Grid.cross(pose.forward, pose.up) }
 
-	# Always two cells ahead at the same level. A block in the path bounces the ball back.
-	jump : Set(World.Cell), World.Pose -> [Land(World.Pose), Fall({ over : World.Pose, drop : Drop }), Bounce]
+	# Always two cells ahead at the same level. A block above or in the path bounces the ball back.
+	jump : Set(World.Cell), World.Pose -> [Land(World.Pose), Fall({ over : World.Pose, drop : Drop }), Bounce(List(Obstacle))]
 	jump = |blocks, pose| {
 		ahead = Grid.add(pose.cell, pose.forward)
 		two_ahead = Grid.add(ahead, pose.forward)
-		if Grid.has_block(blocks, Grid.add(pose.cell, pose.up)) or Grid.has_block(blocks, ahead) or Grid.has_block(blocks, two_ahead) {
-			Bounce
+		ceiling = if Grid.has_block(blocks, Grid.add(pose.cell, pose.up)) {
+			[Ceiling]
+		} else {
+			[]
+		}
+		wall = if Grid.has_block(blocks, ahead) {
+			[Wall(1)]
+		} else if Grid.has_block(blocks, two_ahead) {
+			[Wall(2)]
+		} else {
+			[]
+		}
+		obstacles = ceiling.concat(wall)
+		if obstacles != [] {
+			Bounce(obstacles)
 		} else if Grid.has_block(blocks, Grid.sub(two_ahead, pose.up)) {
 			Land({ ..pose, cell: two_ahead })
 		} else {
@@ -105,6 +131,10 @@ Ball := [].{
 	fell_off : Ball.Ball -> Bool
 	fell_off = |ball| match ball.motion {
 		Falling({ drop: Off(cells), seconds, .. }) => seconds >= fall_seconds(Off(cells))
+		Bouncing(bouncing) => match bouncing.drop {
+			Off(_) => bouncing.seconds >= bounce_seconds(bouncing)
+			Onto(_) => False
+		}
 		_ => False
 	}
 
@@ -112,10 +142,26 @@ Ball := [].{
 	can_land : F32, F32 -> Bool
 	can_land = |t, lift| t >= 16.0 / 27.0 and lift <= 0.0
 
-	# True when the ball ends a forward jump or a fall onto a block between before and after.
-	# The original's CheckIfPlayerLanded runs for these two only, not for a jump in place.
+	# True when the ball touches down on a block between before and after.
 	landed : Ball.Ball, Ball.Ball -> Bool
 	landed = |before, after| can_touch_down(before.motion) and !can_touch_down(after.motion)
+
+	# True when the ball hits a wall or a ceiling between before and after.
+	# A bounce that ends in this step hit in this step too.
+	hit : Ball.Ball, Ball.Ball -> Bool
+	hit = |before, after| match (before.motion, after.motion) {
+		(Bouncing(was), Bouncing(now)) => !past_contact(was) and past_contact(now)
+		(Bouncing(was), _) => !past_contact(was)
+		(_, Bouncing(now)) => past_contact(now)
+		_ => False
+	}
+
+	# The landing squish as a part of the radius, which View adds to the idle bob.
+	squash : Ball.Ball -> F32
+	squash = |ball| match ball.squish {
+		Settled => 0.0
+		Squashing(seconds) => landing_squish(seconds)
+	}
 
 	# A roll or a jump starts only from Still with no turn running. A floor roll,
 	# or an edge roll before the edge, can also start a jump. A turn can start
@@ -162,6 +208,7 @@ Ball := [].{
 				Arc(t) => lifted(jump_placement(from, offset, over, t), Ball.jump_lift(t))
 				Dropped(cells) => lifted(placement_of(over), -cells)
 			}
+			Bouncing(bouncing) => bounce_placement(bouncing)
 		}
 		match ball.turn {
 			Steady => placed
@@ -216,7 +263,130 @@ leap : Set(World.Cell), Ball.Ball, World.Pose, F32 -> Ball.Ball
 leap = |blocks, ball, from, offset| match Ball.jump(blocks, from) {
 	Land(pose) => { ..ball, pose, motion: Jumping({ from, offset, t: 0.0 }) }
 	Fall({ over, drop }) => { ..ball, pose: landing(over, drop), motion: Falling({ from, offset, over, drop, seconds: 0.0, spin_rate: top_spin }) }
-	Bounce => ball
+	Bounce(obstacles) => {
+		hits = obstacles.map(|obstacle| hit_of(obstacle, offset))
+		first = hits.drop_first(1).fold(
+			hits.first() ?? Ceiling(ceiling_t),
+			|a, b| if hit_t(b) < hit_t(a) {
+				b
+			} else {
+				a
+			},
+		)
+		bounce(blocks, ball, from, offset, { ..from, cell: Grid.add(from.cell, Grid.scale(from.forward, 2)) }, first)
+	}
+}
+
+# The ball centre touches a wall one radius before the wall's face.
+hit_of : Ball.Obstacle, F32 -> Ball.Hit
+hit_of = |obstacle, offset| match obstacle {
+	Ceiling => Ceiling(ceiling_t)
+	Wall(cells) => Wall((cells.to_f32() - 0.5 - Ball.radius - offset) / (2.0 - offset))
+}
+
+hit_t : Ball.Hit -> F32
+hit_t = |hit| match hit {
+	Wall(t) => t
+	Ceiling(t) => t
+}
+
+# The ball drops onto the cell nearest the contact, which is less than 1.5
+# cells ahead. From there it can fall further.
+bounce : Set(World.Cell), Ball.Ball, World.Pose, F32, World.Pose, Ball.Hit -> Ball.Ball
+bounce = |blocks, ball, from, offset, to, hit| {
+	column = if reach_at(from, offset, to, hit_t(hit)) < 0.5 {
+		0
+	} else {
+		1
+	}
+	over = { ..from, cell: Grid.add(from.cell, Grid.scale(from.forward, column)) }
+	drop = if Grid.has_block(blocks, Grid.sub(over.cell, over.up)) {
+		Onto(0)
+	} else {
+		drop_below(blocks, over, 1, lowest_along(blocks, over.up, Grid.dot(over.cell, over.up)))
+	}
+	{ ..ball, pose: landing(over, drop), motion: Bouncing({ from, offset, to, hit, over, drop, seconds: 0.0 }) }
+}
+
+# Cells along from.forward from from.cell, t into the jump arc toward to.
+reach_at : World.Pose, F32, World.Pose, F32 -> F32
+reach_at = |from, offset, to, t| offset * (1.0 - t) + Grid.dot(Grid.sub(to.cell, from.cell), from.forward).to_f32() * t
+
+# From the contact, in cells and seconds. back is the speed back along forward.
+Rebound : { at : F32, forward : F32, lift : F32, back : F32, speed : F32, seconds : F32 }
+
+# As in the original, a wall hit jumps the ball back 2 frames of its forward
+# speed and sends it back at that speed. A ceiling hit does the same down. A
+# wall hit while rising starts the drop at 10 units a frame.
+rebound : Ball.Bounce -> Rebound
+rebound = |bouncing| {
+	t = hit_t(bouncing.hit)
+	forward = reach_at(bouncing.from, bouncing.offset, bouncing.to, t)
+	forward_speed = reach_at(bouncing.from, bouncing.offset, bouncing.to, 1.0) - bouncing.offset
+	rising_speed = 4.0 * jump_height * (1.0 - 2.0 * t) / jump_seconds
+	depth = match bouncing.drop {
+		Onto(cells) => cells.to_f32()
+		Off(cells) => cells.to_f32()
+	}
+	at = t * jump_seconds
+	match bouncing.hit {
+		Wall(_) => {
+			speed = if rising_speed > 0.0 {
+				wall_drop_speed
+			} else {
+				0.0
+			}
+			back = forward_speed / jump_seconds
+			{ at, forward: forward - snap_seconds * back, lift: Ball.jump_lift(t), back, speed, seconds: drop_time(speed, Ball.jump_lift(t) + depth) }
+		}
+		Ceiling(_) => {
+			lift = Ball.jump_lift(t) - snap_seconds * rising_speed
+			{ at, forward, lift, back: 0.0, speed: rising_speed, seconds: drop_time(rising_speed, lift + depth) }
+		}
+	}
+}
+
+bounce_seconds : Ball.Bounce -> F32
+bounce_seconds = |bouncing| {
+	r = rebound(bouncing)
+	r.at + r.seconds
+}
+
+past_contact : Ball.Bounce -> Bool
+past_contact = |bouncing| bouncing.seconds >= rebound(bouncing).at
+
+# After the contact the ball reaches over's centre just as it lands. A wall
+# hit gets there on its slowing path back, a ceiling hit at an even pace.
+bounce_placement : Ball.Bounce -> Ball.Placement
+bounce_placement = |bouncing| {
+	r = rebound(bouncing)
+	if bouncing.seconds < r.at {
+		t = bouncing.seconds / jump_seconds
+		lifted(jump_placement(bouncing.from, bouncing.offset, bouncing.to, t), Ball.jump_lift(t))
+	} else {
+		since = bouncing.seconds - r.at
+		share = if r.back > 0.0 {
+			backed(r.back, since) / backed(r.back, r.seconds)
+		} else {
+			since / r.seconds
+		}
+		column = Grid.dot(Grid.sub(bouncing.over.cell, bouncing.from.cell), bouncing.from.forward).to_f32()
+		placed = placement_of(bouncing.from)
+		along = r.forward + (column - r.forward) * share
+		lift = r.lift - fallen(r.speed, since)
+		{ ..placed, pos: Vec3.add(placed.pos, Vec3.add(Vec3.scale(placed.forward, along), Vec3.scale(placed.up, lift))) }
+	}
+}
+
+# Cells travelled back after the contact. The speed drops by 7 units a frame to 0.
+backed : F32, F32 -> F32
+backed = |speed, seconds| {
+	stop = speed / back_slowing
+	if seconds < stop {
+		speed * seconds - 0.5 * back_slowing * seconds * seconds
+	} else {
+		speed * stop / 2.0
+	}
 }
 
 # The original drops until it leaves its fixed grid. The clone stops 2 cells past the lowest block.
@@ -254,7 +424,7 @@ landing = |over, drop| match drop {
 start_jump_in_place : Set(World.Cell), Ball.Ball -> Ball.Ball
 start_jump_in_place = |blocks, ball|
 	if Grid.has_block(blocks, Grid.add(ball.pose.cell, ball.pose.up)) {
-		ball
+		bounce(blocks, ball, ball.pose, 0.0, ball.pose, Ceiling(ceiling_t))
 	} else {
 		{ ..ball, motion: JumpingInPlace({ t: 0.0 }) }
 	}
@@ -263,7 +433,9 @@ start_jump_in_place = |blocks, ball|
 can_touch_down : Ball.Motion -> Bool
 can_touch_down = |motion| match motion {
 	Jumping(_) => True
+	JumpingInPlace(_) => True
 	Falling({ drop: Onto(_), .. }) => True
+	Bouncing({ drop: Onto(_), .. }) => True
 	_ => False
 }
 
@@ -305,13 +477,84 @@ advance_turn = |ball, dt| match ball.turn {
 }
 
 move : Ball.Ball, F32, [Held, Released] -> Ball.Ball
-move = |ball, dt, up| advance_turn(advance_motion(advance_bob(ball, dt), dt, up), dt)
+move = |ball, dt, up| {
+	moved = advance_turn(advance_motion(advance_bob(advance_squish(ball, dt), dt), dt, up), dt)
+	if can_touch_down(ball.motion) and !can_touch_down(moved.motion) {
+		{ ..moved, squish: Squashing(0.0) }
+	} else {
+		moved
+	}
+}
+
+advance_squish : Ball.Ball, F32 -> Ball.Ball
+advance_squish = |ball, dt| match ball.squish {
+	Settled => ball
+	Squashing(seconds) => {
+		..ball,
+		squish: if seconds + dt >= squish_seconds {
+			Settled
+		} else {
+			Squashing(seconds + dt)
+		},
+	}
+}
+
+# The original's landing squish, in 4096ths, one value a PAL frame from the
+# contact frame: it rises by 187 for 4 frames, then falls by 90, 80 and so on
+# down to 20 a frame, until it is 0.
+squish_frames : List(F32)
+squish_frames = squish_rise(4, 0).concat(squish_fall(squish_peak, 100))
+
+squish_rise : I32, I32 -> List(F32)
+squish_rise = |frames, amount|
+	if frames == 0 {
+		[]
+	} else {
+		[(amount + 187).to_f32()].concat(squish_rise(frames - 1, amount + 187))
+	}
+
+squish_peak : I32
+squish_peak = 4 * 187
+
+squish_fall : I32, I32 -> List(F32)
+squish_fall = |amount, damping| {
+	next_damping = if damping - 10 < 20 {
+		20
+	} else {
+		damping - 10
+	}
+	next = amount - next_damping
+	if next <= 0 {
+		[0.0]
+	} else {
+		[next.to_f32()].concat(squish_fall(next, next_damping))
+	}
+}
+
+squish_seconds : F32
+squish_seconds = (squish_frames.len() - 1).to_f32() * 0.02
+
+# Linear between frames: each frame's amount weighs 1 at its frame and 0 one frame away.
+landing_squish : F32 -> F32
+landing_squish = |seconds| {
+	frame = seconds / 0.02
+	squish_frames.map_with_index(|amount, i| amount * hat(frame - i.to_f32())).fold(0.0, |sum, part| sum + part) / 4096.0
+}
+
+hat : F32 -> F32
+hat = |x| if x.abs() < 1.0 {
+	1.0 - x.abs()
+} else {
+	0.0
+}
 
 # The original holds the bob in a forward jump and while the ball wraps an
 # edge. A fall starts with a forward jump.
 advance_bob : Ball.Ball, F32 -> Ball.Ball
 advance_bob = |ball, dt| match ball.motion {
+	_ if ball.squish != Settled => ball
 	Jumping(_) => ball
+	Bouncing(bouncing) if bouncing.to != bouncing.from and !past_contact(bouncing) => ball
 	Falling({ seconds, .. }) if seconds < jump_seconds => ball
 	Rolling({ from, t }) if Ball.roll_kind(from, ball.pose) == Edge and wrapping(t * Ball.roll_length(Edge)) => ball
 	_ => {
@@ -383,6 +626,33 @@ advance_motion = |ball, dt, up| match ball.motion {
 			_ => { ..ball, rot, motion: Falling({ ..falling, seconds: next, spin_rate: spun.rate }) }
 		}
 	}
+	# A forward jump spins at the top rate until the contact. The hit stops the spin.
+	Bouncing(bouncing) => {
+		total = bounce_seconds(bouncing)
+		next = if bouncing.seconds + dt > total {
+			total
+		} else {
+			bouncing.seconds + dt
+		}
+		at = rebound(bouncing).at
+		spin = if bouncing.to == bouncing.from {
+			0.0
+		} else {
+			top_spin * (min(next, at) - min(bouncing.seconds, at))
+		}
+		rot = spin_about(bouncing.from, spin, ball.rot)
+		match bouncing.drop {
+			Onto(_) if next >= total => { ..ball, rot, motion: Still }
+			_ => { ..ball, rot, motion: Bouncing({ ..bouncing, seconds: next }) }
+		}
+	}
+}
+
+min : F32, F32 -> F32
+min = |a, b| if a < b {
+	a
+} else {
+	b
 }
 
 spin_about : World.Pose, F32, Quat.Quat -> Quat.Quat
@@ -438,6 +708,7 @@ seconds_left = |ball| match ball.motion {
 	Jumping({ t, .. }) => (1.0 - t) * jump_seconds
 	JumpingInPlace({ t }) => (1.0 - t) * jump_seconds
 	Falling({ drop, seconds, .. }) => fall_seconds(drop) - seconds
+	Bouncing(bouncing) => bounce_seconds(bouncing) - bouncing.seconds
 }
 
 # PAL frame counts from the original, at 0.02 s a frame. See SPEC.md.
@@ -495,27 +766,50 @@ top_fall_speed = 80.0 / 512.0 / 0.02
 drop_start_speed : F32
 drop_start_speed = 4.0 * jump_height / jump_seconds
 
-seconds_to_top_speed : F32
-seconds_to_top_speed = (top_fall_speed - drop_start_speed) / gravity
-
-distance_to_top_speed : F32
-distance_to_top_speed = (drop_start_speed + top_fall_speed) / 2.0 * seconds_to_top_speed
-
 drop_distance : F32 -> F32
-drop_distance = |seconds|
-	if seconds <= seconds_to_top_speed {
-		drop_start_speed * seconds + 0.5 * gravity * seconds * seconds
-	} else {
-		distance_to_top_speed + top_fall_speed * (seconds - seconds_to_top_speed)
-	}
+drop_distance = |seconds| fallen(drop_start_speed, seconds)
 
 drop_seconds : F32 -> F32
-drop_seconds = |cells|
-	if cells <= distance_to_top_speed {
-		((drop_start_speed * drop_start_speed + 2.0 * gravity * cells).sqrt() - drop_start_speed) / gravity
+drop_seconds = |cells| drop_time(drop_start_speed, cells)
+
+# Cells fallen in seconds from a start speed below the top speed.
+fallen : F32, F32 -> F32
+fallen = |speed, seconds| {
+	to_top = (top_fall_speed - speed) / gravity
+	if seconds <= to_top {
+		speed * seconds + 0.5 * gravity * seconds * seconds
 	} else {
-		seconds_to_top_speed + (cells - distance_to_top_speed) / top_fall_speed
+		(speed + top_fall_speed) / 2.0 * to_top + top_fall_speed * (seconds - to_top)
 	}
+}
+
+drop_time : F32, F32 -> F32
+drop_time = |speed, cells| {
+	to_top = (top_fall_speed - speed) / gravity
+	to_top_cells = (speed + top_fall_speed) / 2.0 * to_top
+	if cells <= to_top_cells {
+		((speed * speed + 2.0 * gravity * cells).sqrt() - speed) / gravity
+	} else {
+		to_top + (cells - to_top_cells) / top_fall_speed
+	}
+}
+
+# A wall hit while rising drops at 10 units a frame, then gains gravity (`player_movement.c:438, 703-705`).
+wall_drop_speed : F32
+wall_drop_speed = 10.0 / 512.0 / 0.02
+
+# The back speed after a wall hit drops by 7 units a frame (`:431-436`).
+back_slowing : F32
+back_slowing = 7.0 / 512.0 / (0.02 * 0.02)
+
+# A hit first moves the ball back by 2 frames of its speed (`:699-701, 742-744`).
+snap_seconds : F32
+snap_seconds = 2.0 * 0.02
+
+# Kula's arc peaks below the height at which the ball would touch a ceiling.
+# It hits at the same part of its peak as the Roll Away jump: at 312 of 458 units.
+ceiling_t : F32
+ceiling_t = (1.0 - (1.0 - 312.0 / 458.0).sqrt()) / 2.0
 
 fall_seconds : Ball.Drop -> F32
 fall_seconds = |drop| {
@@ -620,9 +914,9 @@ expect {
 	over = { ..on_wall, cell: cell(1, 0, -2) }
 	Ball.jump(blocks([cell(0, 0, 0), cell(-1, 0, -2)]), on_wall) == Fall({ over, drop: Onto(1) }) and Ball.jump(blocks([cell(0, 0, 0)]), on_wall) == Fall({ over, drop: Off(3) })
 }
-expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 1, -1), cell(0, 0, -2)]), on_origin) == Bounce
-expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 1, -2), cell(0, 0, -2)]), on_origin) == Bounce
-expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 0, -2), cell(0, 2, 0)]), on_origin) == Bounce
+expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 1, -1), cell(0, 0, -2)]), on_origin) == Bounce([Wall(1)])
+expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 1, -2), cell(0, 0, -2)]), on_origin) == Bounce([Wall(2)])
+expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 0, -2), cell(0, 2, 0)]), on_origin) == Bounce([Ceiling])
 
 floor_ahead : Set(World.Cell)
 floor_ahead = blocks([cell(0, 0, 0), cell(0, 0, -1), cell(0, 0, -2)])
@@ -645,7 +939,14 @@ expect Ball.act(blocks([cell(0, 0, 0), cell(1, 0, 0)]), still, Roll) == still
 expect Ball.act(floor_ahead, still, TurnLeft).turn == Turning({ from: on_origin, t: 0.0, next: Stay })
 expect Ball.act(floor_ahead, still, forward_jump) == { ..still, pose: { ..on_origin, cell: cell(0, 1, -2) }, motion: Jumping({ from: on_origin, offset: 0.0, t: 0.0 }) }
 expect Ball.act(blocks([cell(0, 0, 0)]), still, forward_jump) == { ..still, pose: { ..on_origin, cell: cell(0, 1, -2) }, motion: Falling({ from: on_origin, offset: 0.0, over: { ..on_origin, cell: cell(0, 1, -2) }, drop: Off(3), seconds: 0.0, spin_rate: top_spin }) }
-expect Ball.act(blocks([cell(0, 0, 0), cell(0, 1, -1)]), still, forward_jump) == still
+expect {
+	two_ahead = { ..on_origin, cell: cell(0, 1, -2) }
+	jumped = Ball.act(blocks([cell(0, 0, 0), cell(0, 1, -1)]), still, forward_jump)
+	jumped.pose == on_origin and match jumped.motion {
+		Bouncing({ from, offset, to, hit: Wall(t), over, drop, seconds }) => from == on_origin and offset == 0.0 and to == two_ahead and near(t, (0.5 - Ball.radius) / 2.0) and over == on_origin and drop == Onto(0) and seconds == 0.0
+		_ => False
+	}
+}
 
 # Input is read only when Still.
 expect {
@@ -750,21 +1051,27 @@ expect near_quat(Ball.advance(Ball.act(long_floor, rolling_at(0.25), forward_jum
 
 expect Ball.act(floor_ahead, still, in_place) == { ..still, motion: JumpingInPlace({ t: 0.0 }) }
 expect Ball.advance(Ball.act(floor_ahead, still, in_place), 0.27).motion == JumpingInPlace({ t: 0.5 })
-expect { ..Ball.advance(Ball.act(floor_ahead, still, in_place), 0.54), bob: 0.0 } == still
+expect { ..Ball.advance(Ball.act(floor_ahead, still, in_place), 0.54), bob: 0.0 } == { ..still, squish: Squashing(0.0) }
 
 # A jump in place does not spin.
 expect Ball.advance(Ball.act(floor_ahead, still, in_place), 0.27).rot == Quat.identity
 
 # Only a block above bounces a jump in place. A block ahead does not.
-expect Ball.act(blocks([cell(0, 0, 0), cell(0, 2, 0)]), still, in_place) == still
+expect Ball.act(blocks([cell(0, 0, 0), cell(0, 2, 0)]), still, in_place) == { ..still, motion: Bouncing({ from: on_origin, offset: 0.0, to: on_origin, hit: Ceiling(ceiling_t), over: on_origin, drop: Onto(0), seconds: 0.0 }) }
 expect Ball.act(blocks([cell(0, 0, 0), cell(0, 1, -1)]), still, in_place).motion == JumpingInPlace({ t: 0.0 })
 
 # A jump from a roll lands two cells past the cell the ball is nearest to.
 expect Ball.act(long_floor, rolling_at(0.25), in_place) == { ..still, pose: { ..on_origin, cell: cell(0, 1, -2) }, motion: Jumping({ from: on_origin, offset: 0.25, t: 0.0 }) }
 expect Ball.act(long_floor, rolling_at(0.75), in_place) == { ..still, pose: { ..on_origin, cell: cell(0, 1, -3) }, motion: Jumping({ from: { ..on_origin, cell: cell(0, 1, -1) }, offset: -0.25, t: 0.0 }) }
 
-# A block in the path bounces a jump from a roll. The ball rolls on.
-expect Ball.act(blocks([cell(0, 0, 0), cell(0, 0, -1), cell(0, 0, -2), cell(0, 1, -2)]), rolling_at(0.25), in_place) == rolling_at(0.25)
+# A block in the path bounces a jump from a roll. The ball drops back onto the cell before the wall.
+expect {
+	jumped = Ball.act(blocks([cell(0, 0, 0), cell(0, 0, -1), cell(0, 0, -2), cell(0, 1, -2)]), rolling_at(0.25), in_place)
+	jumped.pose.cell == cell(0, 1, -1) and match jumped.motion {
+		Bouncing({ from, offset, hit: Wall(_), drop, .. }) => from == on_origin and offset == 0.25 and drop == Onto(0)
+		_ => False
+	}
+}
 
 # Climbs and turns cannot start a jump. An edge roll can, until the ball reaches the edge.
 expect {
@@ -849,7 +1156,7 @@ expect {
 expect Ball.advance(rolling_at(0.5), 0.26).motion == Still
 
 # A block above bounces a forward jump too. A block two ahead does not bounce a jump in place.
-expect Ball.act(blocks([cell(0, 0, 0), cell(0, 0, -2), cell(0, 2, 0)]), still, forward_jump) == still
+expect Ball.act(blocks([cell(0, 0, 0), cell(0, 0, -2), cell(0, 2, 0)]), still, forward_jump) == { ..still, motion: Bouncing({ from: on_origin, offset: 0.0, to: { ..on_origin, cell: cell(0, 1, -2) }, hit: Ceiling(ceiling_t), over: on_origin, drop: Onto(0), seconds: 0.0 }) }
 expect Ball.act(blocks([cell(0, 0, 0), cell(0, 1, -2)]), still, in_place).motion == JumpingInPlace({ t: 0.0 })
 
 # The next roll gets the time after the later of the jump's end and the turn's end.
@@ -903,11 +1210,11 @@ expect {
 	!Ball.landed(onto, Ball.advance(onto, 0.70)) and Ball.landed(onto, Ball.advance(onto, 0.71)) and !Ball.landed(off, still)
 }
 
-# As in the original, a jump in place and a roll do not land.
+# As in the original, a jump in place lands and a roll does not.
 expect {
 	jumping_in_place = Ball.act(floor_ahead, still, in_place)
 	rolling = Ball.act(floor_ahead, still, Roll)
-	!Ball.landed(jumping_in_place, Ball.advance(jumping_in_place, 0.54)) and !Ball.landed(rolling, Ball.advance(rolling, 0.26)) and !Ball.landed(still, still)
+	!Ball.landed(jumping_in_place, Ball.advance(jumping_in_place, 0.53)) and Ball.landed(jumping_in_place, Ball.advance(jumping_in_place, 0.54)) and !Ball.landed(rolling, Ball.advance(rolling, 0.26)) and !Ball.landed(still, still)
 }
 
 near_vec3 : Vec3.Vec3, Vec3.Vec3 -> Bool
@@ -969,4 +1276,114 @@ expect {
 	placed = Ball.interpolated(Ball.advance(Ball.act(floor_ahead, jumping_in_place, TurnLeft), 0.16))
 	s = 0.70710678
 	placed.pos.y > 1.0 and near_vec3(placed.forward, { x: -s, y: 0.0, z: -s })
+}
+
+expect Ball.jump(blocks([cell(0, 0, 0), cell(0, 2, 0), cell(0, 1, -1)]), on_origin) == Bounce([Ceiling, Wall(1)])
+
+wall_ahead : Set(World.Cell)
+wall_ahead = blocks([cell(0, 0, 0), cell(0, 1, -1)])
+
+# Distance the ball centre has moved along -z.
+along : Ball.Ball -> F32
+along = |ball| -Ball.centre(ball).z
+
+# The ball hits a wall one ahead 0.082 s into the jump, when its front reaches the wall face.
+expect {
+	jumping = Ball.act(wall_ahead, still, forward_jump)
+	before = Ball.advance(jumping, 0.08)
+	after = Ball.advance(jumping, 0.085)
+	!Ball.hit(jumping, before) and Ball.hit(before, after) and !Ball.hit(after, Ball.advance(after, 0.01)) and along(before) > 0.29 and along(before) < 0.5 - Ball.radius
+}
+
+# The hit throws the ball back 2 frames of its speed, then it slows, drops and lands
+# on its own cell 0.186 s into the jump. It never enters the wall.
+expect {
+	jumping = Ball.act(wall_ahead, still, forward_jump)
+	path = List.repeat(0.005, 40).fold([jumping], |balls, dt| balls.append(Ball.advance(balls.last() ?? jumping, dt)))
+	thrown = Ball.advance(jumping, 0.085)
+	landed = Ball.advance(jumping, 0.19)
+	path.all(|ball| along(ball) <= 0.5 - Ball.radius + 0.0001)
+		and along(thrown) < 0.2
+			and Ball.advance(jumping, 0.18).motion != Still
+				and landed.motion == Still
+					and landed.pose == on_origin
+						and Ball.landed(Ball.advance(jumping, 0.18), landed)
+							and near_vec3(Ball.centre(landed), { x: 0.0, y: 0.695, z: 0.0 })
+}
+
+# A forward jump hit while rising keeps no spin past the contact.
+expect {
+	jumping = Ball.act(wall_ahead, still, forward_jump)
+	Ball.advance(jumping, 0.1).rot == Ball.advance(jumping, 0.18).rot and Ball.advance(jumping, 0.1).rot != Quat.identity
+}
+
+# A wall two ahead throws the ball back onto the middle cell, 0.53 s into the jump.
+expect {
+	gap_floor = blocks([cell(0, 0, 0), cell(0, 0, -1), cell(0, 1, -2)])
+	jumping = Ball.act(gap_floor, still, forward_jump)
+	landed = Ball.advance(jumping, 0.53)
+	jumping.pose.cell == cell(0, 1, -1) and Ball.advance(jumping, 0.52).motion != Still and landed.motion == Still and near_vec3(Ball.centre(landed), { x: 0.0, y: 0.695, z: -1.0 })
+}
+
+# With no floor under the middle cell, the ball drops onto the block below it, or off the level.
+expect {
+	ledge = blocks([cell(0, 0, 0), cell(0, -1, -1), cell(0, 1, -2)])
+	edge = blocks([cell(0, 0, 0), cell(0, 1, -2)])
+	onto = Ball.act(ledge, still, forward_jump)
+	off = Ball.act(edge, still, forward_jump)
+	onto.pose.cell == cell(0, 0, -1) and Ball.advance(onto, 2.0).motion == Still and !Ball.fell_off(Ball.advance(off, 0.6)) and Ball.fell_off(Ball.advance(off, 2.0))
+}
+
+# A jump in place under a block hits the ceiling 0.118 s in and lands 0.197 s in.
+expect {
+	ceiling = blocks([cell(0, 0, 0), cell(0, 2, 0)])
+	jumping = Ball.act(ceiling, still, in_place)
+	before = Ball.advance(jumping, 0.115)
+	after = Ball.advance(jumping, 0.12)
+	landed = Ball.advance(jumping, 0.2)
+	top = Ball.centre(before).y
+	Ball.hit(before, after) and Ball.centre(after).y < top - 0.08 and top < 1.5 - Ball.radius and Ball.advance(jumping, 0.19).motion != Still and landed.motion == Still and landed.pose == on_origin
+}
+
+# A forward jump under a block hits the ceiling, then drops back onto its own cell.
+expect {
+	jumping = Ball.act(blocks([cell(0, 0, 0), cell(0, 0, -2), cell(0, 2, 0)]), still, forward_jump)
+	landed = Ball.advance(jumping, 0.2)
+	Ball.hit(jumping, Ball.advance(jumping, 0.12)) and landed.motion == Still and landed.pose == on_origin and near_vec3(Ball.centre(landed), { x: 0.0, y: 0.695, z: 0.0 })
+}
+
+# No input acts during a bounce.
+expect {
+	bouncing = Ball.act(wall_ahead, still, forward_jump)
+	[TurnLeft, TurnRight, Roll, forward_jump, in_place].all(|action| Ball.act(wall_ahead, bouncing, action) == bouncing)
+}
+
+# The original's landing squish rises to 748 in 4 frames, then falls to 0 by frame 27.
+expect squish_frames.len() == 28 and squish_frames.take_first(5) == [187.0, 374.0, 561.0, 748.0, 658.0] and squish_frames.last() == Ok(0.0)
+
+expect near(landing_squish(0.0), 187.0 / 4096.0) and near(landing_squish(0.06), 748.0 / 4096.0) and near(landing_squish(0.07), 703.0 / 4096.0) and landing_squish(0.54) == 0.0
+
+# A landing starts the squish, which runs out 0.54 s later. The bob holds meanwhile.
+expect {
+	jumping = { ..Ball.act(floor_ahead, still, forward_jump), bob: 0.3 }
+	landed = Ball.advance(jumping, 0.54)
+	squashing = Ball.advance(landed, 0.06)
+	settled = Ball.advance(landed, 0.55)
+	landed.squish == Squashing(0.0) and near(Ball.squash(squashing), 748.0 / 4096.0) and squashing.bob == 0.3 and settled.squish == Settled and Ball.squash(settled) == 0.0 and settled.bob > 0.3
+}
+
+# With Up held, the squish runs on into the next roll.
+expect {
+	landed = Ball.advance_up_held(long_floor, Ball.act(long_floor, still, forward_jump), 0.6)
+	match (landed.motion, landed.squish) {
+		(Rolling(_), Squashing(seconds)) => near(seconds, 0.06)
+		_ => False
+	}
+}
+
+# A bounce squishes as it lands. A roll and a fall off the level do not.
+expect {
+	bounced = Ball.advance(Ball.act(wall_ahead, still, forward_jump), 0.19)
+	rolled = Ball.advance(Ball.act(floor_ahead, still, Roll), 0.26)
+	bounced.squish == Squashing(0.0) and rolled.squish == Settled
 }

@@ -112,14 +112,14 @@ pickup_sounds = |before, after| before.pickups
 	)
 	.commands
 
-# As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
+# As in the original, a landing bounces only while the player has control,
+# which Kula has only in Playing. A wall or ceiling hit always bounces.
 bounce : Model, Model -> List(Command)
-bounce = |before, after|
-	if before.phase == Playing and Ball.landed(before.ball, after.ball) {
-		[Sound.play(after.sounds.bounce)]
-	} else {
-		[]
-	}
+bounce = |before, after| {
+	hit = before.level_number == after.level_number and Ball.hit(before.ball, after.ball)
+	landed = before.phase == Playing and Ball.landed(before.ball, after.ball)
+	[hit, landed].keep_if(|plays| plays).map(|_| Sound.play(after.sounds.bounce))
+}
 
 tick : Model, Model -> List(Command)
 tick = |before, after| match Clock.tick(before.clock, after.clock) {
@@ -543,14 +543,57 @@ expect {
 	step(jumped, idle, QueryResults.empty, 1.0).commands == [Sound.play(bounce_id)]
 }
 
-# A jump in place does not bounce, and a fall off the level restarts it with no bounce.
+# A jump in place bounces as it lands. A fall off the level restarts it with no bounce.
 expect {
 	jumping_in_place = step(column, space, QueryResults.empty, 0.27).model
 	facing_out = at_pose(column, { ..column.level.start, forward: { x: -1, y: 0, z: 0 } })
 	falling = step(facing_out, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.25).model
 	restarted = step(falling, idle, QueryResults.empty, 2.0)
-	step(jumping_in_place, idle, QueryResults.empty, 0.3).commands == [] and restarted.model.ball == started.ball and restarted.commands == []
+	step(jumping_in_place, idle, QueryResults.empty, 0.2).commands == [] and step(jumping_in_place, idle, QueryResults.empty, 0.3).commands == [Sound.play(bounce_id)] and restarted.model.ball == started.ball and restarted.commands == []
 }
+
+# Three blocks in a row with the ball on the last, facing the others. The
+# layers above add a wall or a ceiling.
+blocked : Str -> Model
+blocked = |layers| {
+	level = Level.parse("#\n#\n#\n\n${layers}start 0 0 2 +y -z\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: [], keys_left: 0 }
+}
+
+# Steps of 0.01 s from the jump press on. Each entry is the bounces the step plays.
+bounces_after : Model, Vocabulary.Input -> List(U64)
+bounces_after = |model, press| {
+	first = step(model, press, QueryResults.empty, 0.01)
+	List.repeat(0.01, 60)
+		.fold(
+			{ model: first.model, counts: [first.commands.keep_if(|c| c == Sound.play(bounce_id)).len()] },
+			|so_far, dt| {
+				next = step(so_far.model, idle, QueryResults.empty, dt)
+				{ model: next.model, counts: so_far.counts.append(next.commands.keep_if(|c| c == Sound.play(bounce_id)).len()) }
+			},
+		)
+		.counts
+}
+
+# Steps that played a bounce, counted from 1.
+bounce_steps : List(U64) -> List(U64)
+bounce_steps = |counts| counts.map_with_index(|count, i| List.repeat(i + 1, count)).join_map(|steps| steps)
+
+forward_jump : Vocabulary.Input
+forward_jump = { ..space, held: [Key.code(Up)] }
+
+# A wall one ahead: the bounce plays in the step of the hit, 0.082 s in, and
+# again in the step the ball lands back on its cell, 0.186 s in.
+expect bounce_steps(bounces_after(blocked(".\n#\n.\n\n"), forward_jump)) == [9, 19]
+
+# A wall two ahead: the hit 0.352 s in and the landing on the middle cell 0.528 s in.
+expect bounce_steps(bounces_after(blocked("#\n.\n.\n\n"), forward_jump)) == [36, 53]
+
+# A ceiling over a jump in place: the hit 0.118 s in and the landing 0.197 s in.
+expect bounce_steps(bounces_after(blocked(".\n.\n.\n\n.\n.\n#\n\n"), space)) == [12, 20]
+
+# A jump in place bounces once, as it lands 0.54 s in.
+expect bounce_steps(bounces_after(blocked(""), space)) == [55]
 
 # With no control, in Cleared or Won, a landing is silent, as in the original.
 expect {
