@@ -56,8 +56,8 @@ PAL frames. The bob amount `s` is `rsin(phase) * 200 / 4096`, from -200 to 200.
 | Volume | Nearly constant: (1 + a)²(1 - 2a) ≈ 1 | Inferred | Same |
 | Floor contact | The draw centre moves `-200s / 4096` units along up, up to 0.019 cell. The bottom stays on the floor (`:1042-1044`) | Code | Same: the draw centre drops by 2s × radius. The camera follows the centre without the bob |
 | Phase step | 165 - 1.25 × seconds left, in 4096ths of a turn a frame | Inferred | `Ball.bob_rate` |
-| Period | 2.05 s with 100 s left, 0.91 s with 60 s, 0.64 s with 30 s, 0.50 s at 0 | Inferred | 2.05 s, the rate for 100 s left |
-| Clock changes | The phase carries on, so a rate change has no jump. A Timer pause face stops the clock and holds the rate (`SubtractLevelTimer`). An hourglass flips the time left and changes the rate at once (`level_update3.c:311`) | Code | The clone has no level clock, so the rate does not change |
+| Period | 2.05 s with 100 s left, 0.91 s with 60 s, 0.64 s with 30 s, 0.50 s at 0 | Inferred | 2.05 s, the rate for 100 s left, whatever the level clock shows |
+| Clock changes | The phase carries on, so a rate change has no jump. A Timer pause face stops the clock and holds the rate (`SubtractLevelTimer`). An hourglass flips the time left and changes the rate at once (`level_update3.c:311`) | Code | The clone has a level clock (see Level clock), but the bob does not read it yet. The rate does not change |
 | When it runs | Every frame except in a forward jump (`:930-934`). It also stops while `turningWhere` is not 0: each frame of the edge wrap, and one frame as a turn or a climb starts | Code | Every step except a forward jump, the arc of a fall and the edge wrap. A turn or a climb does not stop it |
 | In a forward jump | The shape holds its last value. The jump stretch acts through `flattenFactor` | Code | The bob phase holds |
 | Landing squish | Adds to `s`. While it runs, the phase stops and the bob holds its value | Code | Task `42fsutrf` |
@@ -283,11 +283,37 @@ points, and a total below 0 ends the game (Code, `main.c:824`).
 | Key | `levelScore += 1000` (`level_update3.c:211`) | Code | Same (`Pickup.points`) |
 | Coin, fruit | 250 for a bronze coin, 2500 for a fruit (`level_update3.c:237-238, 242-296`) | Code | Not in the clone yet |
 | Exit | `totalScore += levelScore` (`main.c:919`) | Code | Same (`Score.bank`). The level score goes to 0 at once, so the HUD shows the banked total in `Cleared` |
-| Death | `totalScore -= levelScore + penalty` (`main.c:913`). A fall and a time out are both deaths | Code | Same for a fall (`Score.die`) |
+| Death | `totalScore -= levelScore + penalty` (`main.c:913`). A fall and a time out are both deaths | Code | Same for a fall and a time out (`Score.die`) |
 | Penalty | (world × 15 + level + 1) × 50, at most 5000 (`main.c:909-911`). `curLevel` counts from 0 (`main.c:183, 876`) | Code | Level number × 50, at most 5000. Kula's level number counts from 1, and Hiro levels 1 to 3 are world 0 (Inferred) |
 | Loss on a death | The try's points never join the total, and the same amount comes off it, so a death loses them twice over | Inferred | Same |
 | Below 0 | Game over. The game goes back to the first level of the world and the total to 0 (`main.c:871-884`) | Code | No game over. The total stops at 0 and the level restarts |
 | Level score on screen | Counts up: each frame it closes a fifth of the gap, plus 1 (`hud.c:136-142`) | Code | Not copied. The HUD shows the level score at once |
+
+## Level clock
+
+The original counts the time left in a level in PAL frames, `levelTimeLeft`
+(Code). The clone counts whole steps left, `Rules.Model.clock`, at the
+fixed step rate `Clock.step_hz`, 120 Hz. A step count does not drift, as a
+sum of `dt` would (Inferred).
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| Start | `startTime` × 50 frames from the level settings record (type 666). Without the record, 4950 frames, 99 s (`level_update2.c:347-351`) | Code | `time n` in the level file: n × 120 steps. Without the line, 99 s (`Clock.default_seconds`). `scripts/convert_level.py` writes the line when the record does not say 99 |
+| Hiro levels 1 to 3 | The settings record says 99 s | Code (`convert_level.py --list`) | No `time` line |
+| Rate | `SubtractLevelTimer(1)` once a frame, at the top of `ProcessPlayer` (`level_update2.c:416`) | Code | One step a step, in `Rules.run_clock`. It runs after the pickups and before the exit test |
+| When it runs | `ProcessPlayer` runs only when the game is not paused, no level end is set and the get-ready screen is not up (`main.c:581-585`) | Code | Only in `Playing`. It stops at the exit and in `Starting` |
+| Timer pause face, debug flag, copycat mode | The clock does not count (`level_update3.c:1145-1158`) | Code | Not in the clone |
+| At 0 | `levelEndReason = LEVEL_END_TIME_OUT` (`level_update3.c:1149-1151`). A time out is a death, the same as a fall: the same penalty and a restart of the same level (`main.c:907-914`) | Code | The level restarts with `Score.die` in the step the clock reaches 0, the same as a fall. No time-out screen |
+| After a restart | `LevelInit` sets the clock again (`level_update2.c:347-351`) | Code (`LevelInit`), Inferred (that a restart runs it) | The clock goes back to the start time |
+| Shown seconds | `1 + levelTimeLeft / 50`, two digits (`hud.c:270`) | Code | `Clock.shown`: 1 + steps left / 120. It reads 1 in the last second |
+| Time panel | The digits show only at 50 s or less. Their colour goes from 0 at 50 s to `(50 - secs) × 128 / 50` (`hud.c:271-283`), so they fade in from black. An hourglass shows above them at all times | Code | `Time n` in a panel at the top centre (`time` in `Hud.roc`), only at 50 s or less. The text colour goes from black at 50 s to 49/50 of white at 1 s. No hourglass |
+| Tick | In the last 20 s, `SFX_HOURGLASS_TICK` plays when `levelTimeLeft` steps from a multiple of 50 to 1 below it, while the level plays (`main.c:640-647`). So it plays as the shown seconds drop to 20, 19 and so on to 1 | Code (condition), Inferred (when it fires) | Same. `Clock.tick` compares the clock before and after the step |
+| Tick volume | `8000 - 10 × (levelTimeLeft - 250)`: 510 as the time drops to 20 s, 10010 as it drops to 1 s (`main.c:643-646`). The landing bounce plays at 7000 (`player_movement.c:693`) | Code | Gain (10510 - 500 n) / 7000 as the time drops to n: 0.07 at 20, 1.43 at 1. The bounce plays at gain 1 |
+| Tick tag | Each other second passes 37000 instead of 0 as the second argument of `SndPlaySfx`. That argument is a tag, not a pitch (`snd.c:155`) | Code | One tick sound at pitch 1 |
+| Tick sound | `SFX_HOURGLASS_TICK` | Code | `assets/sound/tick.wav`, a 60 ms wooden tock from `make_sounds.py` |
+| Hourglass item | Flips the time left and adds points (`level_update3.c:309-315`) | Code | Not in the clone |
+| Lethargy pill | The clock runs 5 times as fast while it acts (`level_update3.c:1118-1121`) | Code | Not in the clone |
+| Idle bob | Speeds up as the time runs out. See Idle bob | Code | Not copied yet |
 
 ## HUD
 
@@ -302,7 +328,7 @@ the banked total shows in `Cleared` and `Won`.
 | Level score | 7 digits at x 100, y 218 (`hud.c:142`, `sprite_init.c:511`) | Code | `Level n` in a panel at the bottom, 30% of the way across |
 | Total score | 7 digits at x 100, y 236, under the level score (`hud.c:135`, `sprite_init.c:510`) | Code | `Score n` under `Level n` in the same panel |
 | Fruit | Five icons at the bottom right (`hud.c:468-487`) | Code | Not in the clone yet |
-| Time | An hourglass and digits at the top centre (`hud.c:270-287`) | Code | Not in the clone yet |
+| Time | An hourglass and digits at the top centre (`hud.c:270-287`) | Code | `Time n` in its own panel at the top centre, no hourglass. See Level clock |
 
 ## Not copied
 
@@ -313,6 +339,8 @@ the banked total shows in `Cleared` and `Won`.
 - The lens flare and the motion blur on fast turns.
 - Fog.
 - The long jump, the Bouncy pill, bounce pads and the boost.
+- The hourglass in the HUD, the hourglass item, Timer pause faces and the
+  time-out screen.
 
 ## Sources
 
