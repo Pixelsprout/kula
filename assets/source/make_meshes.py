@@ -113,8 +113,29 @@ def arctic_texel(edge, dx, dy, noise):
     return scaled((0.62, 0.75, 0.88), noise)
 
 
+# Sandstone with a bright outer bevel, a carved groove and faint layers.
+# Kula's own design. The base, sRGB (212, 130, 62), is more saturated than the
+# Hiro tile's neutral colour (210, 138, 74), because the tone map and the
+# highlight pale it: under the hiro lights a top face shows near the tile colour.
+HIRO_SAND = (0.658, 0.223, 0.048)
+
+
+def hiro_texel(edge, dx, dy, noise):
+    if edge < 1:
+        return scaled(HIRO_SAND, 1.18 * noise)
+    if edge == 3:
+        return scaled(HIRO_SAND, 0.62 * noise)
+    if edge == 4:
+        return scaled(HIRO_SAND, 0.78 * noise)
+    if edge == 5:
+        return scaled(HIRO_SAND, 1.08 * noise)
+    layers = 1.0 + 0.04 * math.sin(0.9 * dy + 0.6 * math.sin(0.2 * dx))
+    return scaled(HIRO_SAND, layers * noise)
+
+
 # Pack name, texel pattern and noise strength. The names match Theme.roc.
 THEMES = [
+    ("hiro", hiro_texel, 0.06),
     ("haze", haze_texel, 0.04),
     ("inca", inca_texel, 0.06),
     ("arctic", arctic_texel, 0.03),
