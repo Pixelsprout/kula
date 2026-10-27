@@ -5,7 +5,7 @@ description: Record an MP4 of Kula played over the rocco Bridge. Use when asked 
 
 # Record gameplay
 
-`record.py` starts Kula in a window with the Bridge, plays a route of moves, saves a screenshot every 4 steps (30 fps at 120 steps a second) and encodes the frames to a 1280x720 H.264 MP4. It prints the ball position after each move. Needs `roc`, `ffmpeg` and a display: a Headless run draws nothing.
+`record.py` starts Kula in a window with the Bridge, plays a route of moves, saves a screenshot every 4 steps (30 fps at 120 steps a second), scales each one to 1280 wide at once and encodes the frames to a 1280x720 H.264 MP4. It prints the ball position after each move. Needs `roc`, `ffmpeg` and a display: a Headless run draws nothing.
 
 ## Steps
 
