@@ -10,12 +10,18 @@ Theme := [].{
 
 	# Levels count from 1. A number past the last level gets the last Theme.
 	of_level : U64 -> Theme.Theme
-	of_level = |number| themes.get(number - 1) ?? arctic
+	of_level = |number| by_level.get(number - 1) ?? haze
 
 	count : U64
-	count = themes.len()
+	count = by_level.len()
 }
 
+# The original loads one look for each world, so all the levels of a world share it.
+# Kula's levels are Hiro levels 1 to 3.
+by_level : List(Theme.Theme)
+by_level = [haze, haze, haze]
+
+# No level uses inca or arctic yet. They wait for levels from other worlds.
 themes : List(Theme.Theme)
 themes = [haze, inca, arctic]
 
@@ -82,7 +88,7 @@ normals = [{ x: 1.0, y: 0.0, z: 0.0 }, { x: -1.0, y: 0.0, z: 0.0 }, { x: 0.0, y:
 
 expect Theme.count == Level.count
 expect themes.map(|t| t.pack) == ["haze", "inca", "arctic"]
-expect Theme.of_level(1).pack == "haze" and Theme.of_level(3).pack == "arctic" and Theme.of_level(4).pack == "arctic"
+expect [1, 2, 3, 4].map(|n| Theme.of_level(n).pack) == ["haze", "haze", "haze", "haze"]
 
 expect themes.all(
 	|t| {

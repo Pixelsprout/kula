@@ -203,35 +203,26 @@ parse_signed_int = |text| {
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
 
-# The route through level1, from S at the bottom of the file towards E at the top:
-# 1. Roll straight along -z from S over the first key.
-# 2. Climb the wall of the upper layer and roll onto its top.
-# 3. Collect the second key, then roll over the far edge onto the side of the block.
-# 4. Climb straight back onto the lower layer.
-# 5. Jump the gap two cells ahead.
-# 6. Roll on to the exit.
+# Level 1 is Hiro level 1: a ring of 4 × 7 blocks round two 2 × 2 holes.
 expect {
 	level = Level.parse(Level.text(1))
-	level.map_ok(|l| l.start) == Ok({ cell: cell(0, 1, 9), up: cell(0, 1, 0), forward: cell(0, 0, -1) })
+	level.map_ok(|l| l.start) == Ok({ cell: cell(0, 1, 6), up: cell(0, 1, 0), forward: cell(0, 0, -1) })
 }
 
 expect {
 	level = Level.parse(Level.text(1))
 	level.map_ok(|l| l.items) == Ok([
+		{ cell: cell(0, 1, 4), up: cell(0, 1, 0), item: Coin },
+		{ cell: cell(3, 1, 1), up: cell(0, 1, 0), item: Coin },
 		{ cell: cell(0, 1, 0), up: cell(0, 1, 0), item: Exit },
-		{ cell: cell(0, 1, 7), up: cell(0, 1, 0), item: Key },
-		{ cell: cell(0, 2, 5), up: cell(0, 1, 0), item: Key },
+		{ cell: cell(3, 1, 6), up: cell(0, 1, 0), item: Fruit },
+		{ cell: cell(3, 1, 3), up: cell(0, 1, 0), item: Key },
 	])
 }
 
 expect {
-	level = Level.parse(Level.text(1))
-	level.map_ok(|l| l.blocks.len()) == Ok(11)
-}
-
-expect {
 	blocks = Level.parse(Level.text(1)).map_ok(|l| l.blocks) ?? Set.empty()
-	Grid.has_block(blocks, cell(0, 0, 9)) and Grid.has_block(blocks, cell(0, 1, 6)) and !Grid.has_block(blocks, cell(0, 0, 3)) and !Grid.has_block(blocks, cell(0, 1, 7))
+	blocks.len() == 20 and Grid.has_block(blocks, cell(3, 0, 3)) and !Grid.has_block(blocks, cell(1, 0, 1)) and !Grid.has_block(blocks, cell(2, 0, 5))
 }
 
 expect Level.parse("#S\n##\n\n..\n.") == Err(RaggedRow(5))
@@ -294,14 +285,14 @@ expect Level.parse("S\n\ntime 4 5\n") == Err(BadEntry(3))
 expect Level.count == 3
 expect Level.parse(Level.text(4)) == Err(NoStart)
 
-# level2 turns twice and jumps a gap.
+# Level 2 is Hiro level 2: three rings with a one-cell gap between each two.
 expect {
 	level = Level.parse(Level.text(2))
-	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).len(), blocks: l.blocks.len() }) == Ok({ start: cell(0, 1, 7), keys: 2, blocks: 11 })
+	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).map(|e| e.cell), coins: l.items.keep_if(|e| e.item == Coin).len(), blocks: l.blocks.len() }) == Ok({ start: cell(0, 1, 8), keys: [cell(0, 1, 0)], coins: 6, blocks: 38 })
 }
 
-# level3 climbs a tower two blocks high.
+# Level 3 is Hiro level 3. Its key sits on the +z side of a bridge three blocks up.
 expect {
 	level = Level.parse(Level.text(3))
-	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).map(|e| e.cell), blocks: l.blocks.len() }) == Ok({ start: cell(0, 1, 9), keys: [cell(0, 2, 5), cell(0, 3, 6)], blocks: 12 })
+	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).map(|e| { cell: e.cell, up: e.up }), coins: l.items.keep_if(|e| e.item == Coin).len(), blocks: l.blocks.len() }) == Ok({ start: cell(4, 1, 6), keys: [{ cell: cell(5, 3, 1), up: cell(0, 0, 1) }], coins: 10, blocks: 40 })
 }

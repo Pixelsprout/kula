@@ -55,24 +55,24 @@ fruit_corner = |model| Box(
 panel : Ui.BoxConfig
 panel = { ..Ui.panel(LeftTop, { x: 0.0, y: 0.0 }), floating: NoFloat }
 
-# The ball stands on level 1's first key, then collects it.
+# The ball stands on level 1's key, then collects it.
 one_key : Rules.Model
 one_key = {
 	start = Rules.start(View.primitive_meshes, 1)
-	Rules.collect({ ..start, ball: Ball.start({ ..start.ball.pose, cell: { x: 0, y: 1, z: 7 } }) })
+	Rules.collect({ ..start, ball: Ball.start({ ..start.ball.pose, cell: { x: 3, y: 1, z: 3 } }) })
 }
 
 # The HUD's first root is one row along the bottom: the keys panel, then the scores panel.
 expect
 	match Hud.ui(Rules.start(View.primitive_meshes, 1)) {
 		[Box(row, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _] =>
-			row.floating == Float({ attach: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and keys_text == Ui.label("Keys 0 / 2") and level.str == "Level 0" and total.str == "Score 0"
+			row.floating == Float({ attach: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and keys_text == Ui.label("Keys 0 / 1") and level.str == "Level 0" and total.str == "Score 0"
 		_ => Bool.False
 	}
 
 expect
 	match Hud.ui({ ..one_key, score: { ..one_key.score, total: 2500 } }) {
-		[Box(_, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _] => keys_text.str == "Keys 1 / 2" and level.str == "Level 1000" and total.str == "Score 2500"
+		[Box(_, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _] => keys_text.str == "Keys 1 / 1" and level.str == "Level 1000" and total.str == "Score 2500"
 		_ => Bool.False
 	}
 

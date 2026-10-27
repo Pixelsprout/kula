@@ -138,54 +138,49 @@ cell = |x, y, z| { x, y, z }
 at : Rules.Model, World.Cell -> Rules.Model
 at = |model, c| { ..model, ball: Ball.start({ ..model.ball.pose, cell: c }) }
 
-first_key : World.Cell
-first_key = cell(0, 1, 7)
-
-second_key : World.Cell
-second_key = cell(0, 2, 5)
+key_cell : World.Cell
+key_cell = cell(3, 1, 3)
 
 exit_cell : World.Cell
 exit_cell = cell(0, 1, 0)
 
+last_exit_cell : World.Cell
+last_exit_cell = cell(7, 1, 6)
+
 expect {
 	model = Rules.start(meshes, 1)
-	model.keys_left == 2 and model.phase == Playing and model.pickups.len() == 2 and !Rules.exit_open(model)
+	model.keys_left == 1 and model.phase == Playing and model.pickups.map(|pickup| pickup.kind) == [Coin, Coin, Fruit(Apple), Key] and !Rules.exit_open(model)
 }
 
 expect {
-	model = Rules.collect(at(Rules.start(meshes, 1), first_key))
-	model.keys_left == 1 and model.pickups.map(|pickup| pickup.cell) == [second_key]
+	model = Rules.collect(at(Rules.start(meshes, 1), key_cell))
+	model.keys_left == 0 and Rules.exit_open(model) and model.pickups.map(|pickup| pickup.kind) == [Coin, Coin, Fruit(Apple)]
 }
 
 # A pickup starts a flash one cell above its face.
-expect Rules.collect(at(Rules.start(meshes, 1), first_key)).flashes == [{ pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0, kind: Key }]
+expect Rules.collect(at(Rules.start(meshes, 1), key_cell)).flashes == [{ pos: { x: 3.0, y: 1.5, z: 3.0 }, age: 0.0, kind: Key }]
 
 # Standing on a collected key does not count it twice.
-expect Rules.collect(Rules.collect(at(Rules.start(meshes, 1), first_key))).keys_left == 1
+expect Rules.collect(Rules.collect(at(Rules.start(meshes, 1), key_cell))).keys_left == 0
 
 expect Rules.collect(Rules.start(meshes, 1)) == Rules.start(meshes, 1)
-
-expect {
-	both = Rules.collect(at(Rules.collect(at(Rules.start(meshes, 1), first_key)), second_key))
-	both.keys_left == 0 and Rules.exit_open(both)
-}
 
 expect Rules.exit(at(Rules.start(meshes, 1), exit_cell)).phase == Playing
 
 expect {
-	model = at(Rules.start(meshes, 1), first_key)
+	model = at(Rules.start(meshes, 1), key_cell)
 	ball = { ..model.ball, motion: Falling({ from: model.level.start, offset: 0.0, over: model.level.start, drop: Off(3), seconds: 0.5, spin_rate: 0.0 }) }
 	Rules.fall({ ..model, ball }) == { ..model, ball }
 }
 
 expect {
-	dirty = { ..Rules.collect(at(Rules.start(meshes, 1), first_key)), phase: Won }
+	dirty = { ..Rules.collect(at(Rules.start(meshes, 1), key_cell)), phase: Won }
 	ball = { ..dirty.ball, motion: Falling({ from: dirty.level.start, offset: 0.0, over: dirty.level.start, drop: Off(3), seconds: 1.0, spin_rate: 0.0 }) }
 	Rules.fall({ ..dirty, ball }) == Rules.start(meshes, 1)
 }
 
 expect Ok(Rules.start(meshes, 2).level) == Level.parse(Level.text(2))
-expect Rules.start(meshes, 3).keys_left == 2 and Rules.start(meshes, 3).level_number == 3
+expect Rules.start(meshes, 3).keys_left == 1 and Rules.start(meshes, 3).level_number == 3
 
 # The exit of a level before the last clears it. The last level's exit wins.
 expect {
@@ -196,13 +191,13 @@ expect {
 expect {
 	last = Rules.start(meshes, 3)
 	open = { ..last, keys_left: 0 }
-	Rules.exit(at(open, exit_cell)).phase == Won and Rules.exit(open).phase == Playing
+	Rules.exit(at(open, last_exit_cell)).phase == Won and Rules.exit(open).phase == Playing
 }
 
 # The next level starts with the ball still for a short pause.
 expect {
 	next = Rules.next_level({ ..Rules.start(meshes, 1), phase: Cleared })
-	next.level_number == 2 and next.phase == Starting(Rules.start_pause) and next.ball == Ball.start(next.level.start) and next.keys_left == 2
+	next.level_number == 2 and next.phase == Starting(Rules.start_pause) and next.ball == Ball.start(next.level.start) and next.keys_left == 1
 }
 
 expect Rules.count_down(0.4)({ ..Rules.start(meshes, 2), phase: Starting(1.0) }).phase == Starting(0.6)
@@ -244,8 +239,8 @@ expect Rules.collect(on_face(two_faces("exit"), cell(-1, 0, 0))).keys_left == 1
 
 # Without control the ball collects nothing.
 expect {
-	on_key = at(Rules.start(meshes, 1), first_key)
-	[Cleared, Starting(0.5), Won].all(|phase| Rules.collect({ ..on_key, phase }).keys_left == 2)
+	on_key = at(Rules.start(meshes, 1), key_cell)
+	[Cleared, Starting(0.5), Won].all(|phase| Rules.collect({ ..on_key, phase }).keys_left == 1)
 }
 
 # A forward jump from z 2 to z 0, with a key on the wall beside z 1 or on the floor of z 1.
@@ -299,7 +294,7 @@ off_the_level : Rules.Model -> Rules.Model
 off_the_level = |model| { ..model, ball: { ..model.ball, motion: Falling({ from: model.level.start, offset: 0.0, over: model.level.start, drop: Off(3), seconds: 1.0, spin_rate: 0.0 }) } }
 
 # A key adds 1000 to the level score and nothing to the total.
-expect Rules.collect(at(Rules.start(meshes, 1), first_key)).score == { level: 1000, total: 0 }
+expect Rules.collect(at(Rules.start(meshes, 1), key_cell)).score == { level: 1000, total: 0 }
 
 # The exit banks the level score, and the next level starts from the banked total.
 expect {
@@ -309,7 +304,7 @@ expect {
 }
 
 expect {
-	last = { ..at(Rules.start(meshes, 3), exit_cell), keys_left: 0, score: { level: 1000, total: 0 } }
+	last = { ..at(Rules.start(meshes, 3), last_exit_cell), keys_left: 0, score: { level: 1000, total: 0 } }
 	Rules.exit(last).score == { level: 0, total: 1000 }
 }
 
@@ -318,7 +313,7 @@ expect Rules.fall(off_the_level({ ..Rules.start(meshes, 2), score: { level: 1000
 
 # A death with too little banked leaves the total at 0.
 expect {
-	first_try = Rules.collect(at(Rules.start(meshes, 1), first_key))
+	first_try = Rules.collect(at(Rules.start(meshes, 1), key_cell))
 	Rules.fall(off_the_level(first_try)).score == Score.zero
 }
 
