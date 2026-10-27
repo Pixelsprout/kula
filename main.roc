@@ -1,12 +1,15 @@
-app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/platform-CdUrA58dQQFQLxKFBNEc9vtFP652ZwvQ5Tb59GYDCrUQ.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst" }
+app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/mesh-5Fmg6uFHADmSBmZxNWDg25VStK6mU7YqhkWEXHjMEGNP.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/platform-DovzqwbAVit5yFpSzvKzqgwS8dpakvq2mdQJH3qcAHkb.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0-rc.1/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst" }
 
-import linalg.Quat
 import linalg.Vec3
-import pf.Vocabulary exposing [Command, Config, Draw, Input, Manifest, Rgb, Scene]
+import pf.Vocabulary exposing [Command, Config, Manifest, Rgb]
+import pf.Button
+import pf.Draw
+import pf.Input
 import pf.Key
 import pf.Launch
 import pf.Light
 import pf.QueryResults
+import pf.Scene
 import pf.Sound
 import World
 import Grid
@@ -58,11 +61,12 @@ loaded = |model, pack, manifest| {
 	}
 }
 
-step : Model, Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
+step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
-	stages = [Rules.count_down(dt), read_input(input), move_ball(input, dt), Rules.collect, Rules.exit, Rules.fall]
+	controls = read_controls(input)
+	stages = [Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
-	quit = if Key.pressed(input, Escape) {
+	quit = if controls.quit {
 		[Quit]
 	} else {
 		[]
@@ -85,38 +89,55 @@ bounce = |before, after|
 		[]
 	}
 
-# Input is read before the ball moves. Ball.act ignores a key that cannot act on the current move.
-read_input : Input -> (Model -> Model)
-read_input = |input| |model| match (model.phase, action(input)) {
+# forward is held; the others are pressed in this step.
+Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, quit : Bool }
+
+# The keys and every connected pad drive the one ball.
+read_controls : Vocabulary.Input -> Controls
+read_controls = |input| {
+	forward: Key.held(input, Up) or Button.held_any(input, DpadUp) or input.gamepads.any(|pad| pad.left_stick.y > stick_forward),
+	jump: Key.pressed(input, Space) or Button.pressed_any(input, South),
+	left: Key.pressed(input, Left) or Button.pressed_any(input, DpadLeft),
+	right: Key.pressed(input, Right) or Button.pressed_any(input, DpadRight),
+	quit: Key.pressed(input, Escape) or Button.pressed_any(input, Start),
+}
+
+# The stick must pass half its travel, so a light touch does not roll the ball.
+stick_forward : F32
+stick_forward = 0.5
+
+# Input is read before the ball moves. Ball.act ignores a control that cannot act on the current move.
+read_input : Controls -> (Model -> Model)
+read_input = |controls| |model| match (model.phase, action(controls)) {
 	(Playing, Ok(act)) => { ..model, ball: Ball.act(model.level.blocks, model.ball, act) }
 	_ => model
 }
 
-move_ball : Input, F32 -> (Model -> Model)
-move_ball = |input, dt| |model|
-	if Key.held(input, Up) {
+move_ball : Controls, F32 -> (Model -> Model)
+move_ball = |controls, dt| |model|
+	if controls.forward {
 		{ ..model, ball: Ball.advance_up_held(model.level.blocks, model.ball, dt) }
 	} else {
 		{ ..model, ball: Ball.advance(model.ball, dt) }
 	}
 
-# Tank controls. Up rolls while held; the others act on press only. Space with Up
-# held is a forward jump.
-action : Input -> Try(Ball.Action, [NoAction])
-action = |input|
-	if Key.pressed(input, Space) {
-		Ok(Jump({ up_held: Key.held(input, Up) }))
-	} else if Key.pressed(input, Left) {
+# Tank controls. Forward rolls while held; the others act on press only. A jump
+# with forward held is a forward jump.
+action : Controls -> Try(Ball.Action, [NoAction])
+action = |controls|
+	if controls.jump {
+		Ok(Jump({ up_held: controls.forward }))
+	} else if controls.left {
 		Ok(TurnLeft)
-	} else if Key.pressed(input, Right) {
+	} else if controls.right {
 		Ok(TurnRight)
-	} else if Key.held(input, Up) {
+	} else if controls.forward {
 		Ok(Roll)
 	} else {
 		Err(NoAction)
 	}
 
-view : Model -> Scene
+view : Model -> Vocabulary.Scene
 view = |model| {
 	theme = Theme.of_level(model.level_number)
 	exits = model.level.items.keep_if(|entry| entry.item == Exit).map(|entry| below(entry.cell))
@@ -152,7 +173,9 @@ view = |model| {
 		playing_ball_tint
 	}
 	ball = View.ball_draw(model.ball, model.meshes.ball, ball_tint)
-	{ camera, draws: blocks.concat(keys).append(ball), colliders: [], lights: theme.lights, cursor: Free, sky: model.meshes.sky, ui: Hud.ui(model), queries: [], loops: [] }
+	lights = theme.lights.map(|light| Light(light))
+	draws = blocks.concat(keys).append(ball).map(|draw| Draw(draw))
+	{ ..Scene.empty, camera, nodes: lights.concat(draws), sky: model.meshes.sky, ui: Hud.ui(model) }
 }
 
 # Face draw ids count up from 1, so the key ids start well past any level's faces.
@@ -182,21 +205,41 @@ won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 below : World.Cell -> World.Cell
 below = |cell| { ..cell, y: cell.y - 1 }
 
-cube : World.Meshes, U64, World.Cell, F32, Rgb -> Draw
-cube = |meshes, id, cell, size, tint| { id, mesh: meshes.cube, pos: Grid.to_vec3(cell), scale: Vec3.scale(Vec3.one, size), rot: Quat.identity, scale_rot: Quat.identity, tint }
+cube : World.Meshes, U64, World.Cell, F32, Rgb -> Vocabulary.Draw
+cube = |meshes, id, cell, size, tint| { ..Draw.default, id, mesh: meshes.cube, pos: Grid.to_vec3(cell), scale: Vec3.scale(Vec3.one, size), tint }
+
+# A Manifest of meshes, skies and Sounds with no durations or Clips.
+manifest : List((Str, U32)) -> Manifest
+manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: [] })
 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
 	booted = init({ seed: 0, args: [], assets: ["ball", "haze_face", "sky/haze", "sound/bounce"] }).model
-	loaded(loaded(booted, "kula", [{ name: "ball", id: 4 }, { name: "sound/bounce", id: bounce_id }]), "haze", [{ name: "haze_face", id: 5 }, { name: "sky/haze", id: 1 }])
+	loaded(loaded(booted, "kula", manifest([("ball", 4), ("sound/bounce", bounce_id)])), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
 }
 
 bounce_id : U32
 bounce_id = 65537
 
-idle : Input
-idle = { held: [], pressed: [], mouse: { dx: 0.0, dy: 0.0 } }
+idle : Vocabulary.Input
+idle = Input.empty
+
+draws_in : Vocabulary.Scene -> List(Vocabulary.Draw)
+draws_in = |scene| scene.nodes.join_map(
+	|node| match node {
+		Draw(draw) => [draw]
+		_ => []
+	},
+)
+
+lights_in : Vocabulary.Scene -> List(Vocabulary.Light)
+lights_in = |scene| scene.nodes.join_map(
+	|node| match node {
+		Light(light) => [light]
+		_ => []
+	},
+)
 
 expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "sound/bounce"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, sky: 0 }
@@ -206,7 +249,7 @@ expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
 
-up_held : Input
+up_held : Vocabulary.Input
 up_held = { ..idle, held: [Key.code(Up)] }
 
 expect step(started, up_held, QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
@@ -220,37 +263,68 @@ expect {
 expect step(started, { ..idle, pressed: [Key.code(Escape)] }, QueryResults.empty, 0.1).commands == [Quit]
 expect step(started, idle, QueryResults.empty, 0.1).commands == []
 
+with_pads : List(Vocabulary.Gamepad) -> Vocabulary.Input
+with_pads = |pads| { ..Input.empty, gamepads: pads }
+
+pad_holding : Button -> Vocabulary.Gamepad
+pad_holding = |button| { ..Input.idle_gamepad, held: [Button.code(button)] }
+
+pad_pressing : Button -> Vocabulary.Gamepad
+pad_pressing = |button| { ..Input.idle_gamepad, pressed: [Button.code(button)] }
+
+stick_at : F32 -> Vocabulary.Gamepad
+stick_at = |y| { ..Input.idle_gamepad, left_stick: { x: 0.0, y } }
+
+expect step(started, with_pads([pad_holding(DpadUp)]), QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
+expect step(started, with_pads([stick_at(0.6)]), QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
+expect step(started, with_pads([stick_at(0.5)]), QueryResults.empty, 0.13).model.ball.motion == Still
+
+# Any pad drives the ball, here the pad in slot 2.
+expect step(started, with_pads([Input.idle_gamepad, { ..pad_holding(DpadUp), slot: 2 }]), QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
+
+expect step(started, with_pads([pad_pressing(DpadLeft)]), QueryResults.empty, 0.16).model.ball.turn == Turning({ from: started.level.start, t: 0.5, next: Stay })
+expect step(started, with_pads([pad_holding(DpadLeft)]), QueryResults.empty, 0.16).model.ball.turn == Steady
+
 expect {
-	draws = view(started).draws
+	turned = step(started, with_pads([pad_pressing(DpadRight)]), QueryResults.empty, 0.32).model
+	turned.ball.pose.forward == { x: 1, y: 0, z: 0 }
+}
+
+expect step(started, with_pads([pad_pressing(South)]), QueryResults.empty, 0.27).model.ball.motion == JumpingInPlace({ t: 0.5 })
+expect step(started, with_pads([pad_pressing(Start)]), QueryResults.empty, 0.1).commands == [Quit]
+expect step(started, with_pads([Input.idle_gamepad]), QueryResults.empty, 0.1) == step(started, idle, QueryResults.empty, 0.1)
+
+expect {
+	draws = draws_in(view(started))
 	draws.len() == 49
 }
 
 expect {
-	draws = view(started).draws
+	draws = draws_in(view(started))
 	exit_faces = draws.keep_if(|d| d.tint == closed_exit_tint)
 	exit_faces.len() == 5 and exit_faces.all(|d| Vec3.length(d.pos) == 0.5)
 }
 
 expect {
-	draws = view(started).draws
+	draws = draws_in(view(started))
 	keys = draws.keep_if(|d| d.tint == key_tint)
 	keys.map(|d| d.pos) == [{ x: 0.0, y: 1.0, z: 7.0 }, { x: 0.0, y: 2.0, z: 5.0 }] and keys.all(|d| d.scale.x == 0.3)
 }
 
 expect {
 	model = started
-	ball = view(model).draws.keep_if(|d| d.mesh == model.meshes.ball)
+	ball = draws_in(view(model)).keep_if(|d| d.mesh == model.meshes.ball)
 	ball.map(|d| d.pos) == [{ x: 0.0, y: 0.695, z: 9.0 }]
 }
 
 # In the climb at the level1 wall, the eye passes down through the old floor.
 # Only as it passes does that face drop out, and the rest keep their ids.
 expect {
-	rest = view(started).draws
+	rest = draws_in(view(started))
 	at_wall = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
 	faces_at = |dt| {
 		climbing = step(at_wall, up_held, QueryResults.empty, dt).model
-		view(climbing).draws.keep_if(|d| d.mesh == climbing.meshes.face)
+		draws_in(view(climbing)).keep_if(|d| d.mesh == climbing.meshes.face)
 	}
 	passing = faces_at(0.152)
 	faces_at(0.14).len() == 46 and passing.len() < 46 and passing.all(|d| rest.any(|r| r.id == d.id and r.pos == d.pos))
@@ -293,21 +367,21 @@ expect {
 
 expect {
 	collected = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
-	keys = view(collected).draws.keep_if(|d| d.tint == key_tint)
+	keys = draws_in(view(collected)).keep_if(|d| d.tint == key_tint)
 	keys.map(|d| d.pos) == [{ x: 0.0, y: 2.0, z: 5.0 }] and keys.map(|d| d.id) == [key_ids + 1]
 }
 
 expect {
-	draws = view({ ..started, keys_left: 0 }).draws
+	draws = draws_in(view({ ..started, keys_left: 0 }))
 	draws.keep_if(|d| d.tint == open_exit_tint).len() == 5 and !draws.any(|d| d.tint == closed_exit_tint)
 }
 
 expect {
 	won = { ..started, phase: Won }
-	view(won).draws.keep_if(|d| d.mesh == won.meshes.ball).map(|d| d.tint) == [won_ball_tint]
+	draws_in(view(won)).keep_if(|d| d.mesh == won.meshes.ball).map(|d| d.tint) == [won_ball_tint]
 }
 
-space : Input
+space : Vocabulary.Input
 space = { ..idle, pressed: [Key.code(Space)] }
 
 expect step(started, space, QueryResults.empty, 0.27).model.ball.motion == JumpingInPlace({ t: 0.5 })
@@ -316,6 +390,14 @@ expect step(started, space, QueryResults.empty, 0.27).model.ball.motion == Jumpi
 expect {
 	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
 	jumped = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1).model
+	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and jumped.ball.motion == Jumping({ from: before_gap.ball.pose, offset: 0.0, t: 0.1 / 0.54 })
+}
+
+# South with the pad's forward held jumps the gap too.
+expect {
+	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
+	jump_forward = { ..stick_at(1.0), pressed: [Button.code(South)] }
+	jumped = step(before_gap, with_pads([jump_forward]), QueryResults.empty, 0.1).model
 	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and jumped.ball.motion == Jumping({ from: before_gap.ball.pose, offset: 0.0, t: 0.1 / 0.54 })
 }
 
@@ -392,7 +474,7 @@ expect {
 expect {
 	open = { ..at_pose(started, before_exit), keys_left: 0 }
 	finished = step(open, up_held, QueryResults.empty, 0.1)
-	switched = loaded(finished.model, "inca", [{ name: "inca_face", id: 7 }, { name: "sky/inca", id: 2 }])
+	switched = loaded(finished.model, "inca", manifest([("inca_face", 7), ("sky/inca", 2)]))
 	after = step(switched, idle, QueryResults.empty, 0.1)
 	finished.commands == [Load({ pack: "inca", assets: ["inca_face", "sky/inca"] })]
 		and finished.model.phase == Cleared
@@ -412,7 +494,7 @@ expect {
 }
 
 # A loaded for a pack Kula did not ask for changes nothing.
-expect loaded(started, "inca", [{ name: "inca_face", id: 7 }]) == started
+expect loaded(started, "inca", manifest([("inca_face", 7)])) == started
 
 # During the pause the ball ignores input. After it, the level plays.
 expect {
@@ -422,7 +504,7 @@ expect {
 	paused.ball.motion == Still and playing.phase == Playing and step(playing, up_held, QueryResults.empty, 0.1).model.ball.motion != Still
 }
 
-expect view(on_level(2)).lights == Theme.of_level(2).lights
+expect lights_in(view(on_level(2))) == Theme.of_level(2).lights
 
 Move : [Roll, Left, Right, Leap]
 

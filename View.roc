@@ -1,7 +1,8 @@
 import linalg.Quat
 import linalg.Vec3
 import mesh.Mesh
-import pf.Vocabulary exposing [Camera, Draw, Manifest, Rgb]
+import pf.Vocabulary exposing [Camera, Manifest, Rgb]
+import pf.Draw
 import World
 import Grid
 import Ball
@@ -43,14 +44,14 @@ View := [].{
 
 	# The idle bob squashes the ball along up, not along a spinning model axis.
 	# The centre drops as the ball squashes, so its bottom stays on the floor.
-	ball_draw : Ball.Ball, U32, Rgb -> Draw
+	ball_draw : Ball.Ball, U32, Rgb -> Vocabulary.Draw
 	ball_draw = |ball, mesh, tint| {
 		up = View.interpolated(ball).up
 		s = bob_amount * (2.0 * pi * ball.bob).sin()
 		pos = Vec3.sub(centre(ball), Vec3.scale(up, 2.0 * s * Ball.radius))
 		scale = Vec3.scale({ x: 1.0 + s, y: 1.0 - 2.0 * s, z: 1.0 + s }, 2.0 * Ball.radius)
 		scale_rot = Quat.mul(Quat.conjugate(ball.rot), Quat.between({ x: 0.0, y: 1.0, z: 0.0 }, up))
-		{ id: 0, mesh, pos, scale, rot: ball.rot, scale_rot, tint }
+		{ ..Draw.default, id: 0, mesh, pos, scale, rot: ball.rot, scale_rot, tint }
 	}
 
 	# Rigid in the ball's frame, with no smoothing and no clipping test, as in the
@@ -92,10 +93,10 @@ View := [].{
 	}
 
 	# A Theme's face mesh, like the primitive plane, faces +y and is one-sided.
-	face_draw : U64, U32, Face, Rgb -> Draw
+	face_draw : U64, U32, Face, Rgb -> Vocabulary.Draw
 	face_draw = |id, mesh, face, tint| {
 		pos = Vec3.add(Grid.to_vec3(face.block), Vec3.scale(Grid.to_vec3(face.normal), 0.5))
-		{ id, mesh, pos, scale: Vec3.one, rot: face_rot(face.normal), scale_rot: Quat.identity, tint }
+		{ ..Draw.default, id, mesh, pos, rot: face_rot(face.normal), tint }
 	}
 }
 
