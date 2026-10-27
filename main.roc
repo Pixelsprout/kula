@@ -164,8 +164,8 @@ view = |model| {
 	# Ids come before the collected filter too, so a key keeps its id.
 	keys = model.level.items
 		.keep_if(|entry| entry.item == Key)
-		.map_with_index(|entry, i| { cell: entry.cell, id: key_ids + i.to_u64() })
-		.keep_if(|key| !model.collected.contains(key.cell))
+		.map_with_index(|entry, i| { cell: entry.cell, up: entry.up, id: key_ids + i.to_u64() })
+		.keep_if(|key| !model.collected.contains({ cell: key.cell, up: key.up }))
 		.map(|key| cube(model.meshes, key.id, key.cell, 0.3, key_tint))
 	ball_tint = if model.phase == Won {
 		won_ball_tint
@@ -330,7 +330,7 @@ expect {
 # Rolling from S over the first key collects it.
 expect {
 	model = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
-	model.keys_left == 1 and model.collected.contains({ x: 0, y: 1, z: 7 })
+	model.keys_left == 1 and model.collected.contains({ cell: { x: 0, y: 1, z: 7 }, up: { x: 0, y: 1, z: 0 } })
 }
 
 at_pose : Model, World.Pose -> Model
@@ -403,7 +403,7 @@ expect {
 	on_layer1 = at_pose(started, { ..started.level.start, cell: { x: 0, y: 2, z: 6 } })
 	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
 	jumped = step(rolling, space, QueryResults.empty, 0.01).model
-	jumped.collected.contains({ x: 0, y: 2, z: 5 }) and jumped.keys_left == 1 and match jumped.ball.motion {
+	jumped.collected.contains({ cell: { x: 0, y: 2, z: 5 }, up: { x: 0, y: 1, z: 0 } }) and jumped.keys_left == 1 and match jumped.ball.motion {
 		Falling({ from, .. }) => from.cell == { x: 0, y: 2, z: 6 }
 		_ => False
 	}

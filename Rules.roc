@@ -6,17 +6,13 @@ Rules := [].{
 	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
 	Phase : [Playing, Cleared, Starting(F32), Won]
 
-	# collected holds the cells of the keys taken so far. The Level keeps every item.
+	# collected holds the cell and up of each key taken so far. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
 	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, collected : Set(World.Cell), unloads : List(Str) }
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, collected : Set({ cell : World.Cell, up : World.Cell }), unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
-	start = |meshes, level_number| {
-		level = parse_or_crash(Level.text(level_number))
-		keys = level.items.keep_if(|entry| entry.item == Key).len()
-		{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, collected: Set.empty(), unloads: [] }
-	}
+	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
 
 	restart : Model -> Model
 	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce }
@@ -40,9 +36,9 @@ Rules := [].{
 	# Runs every step, so a key collects as soon as the move onto its cell commits.
 	collect : Model -> Model
 	collect = |model| {
-		cell = model.ball.pose.cell
-		if has_item(model.level, cell, Key) and !model.collected.contains(cell) {
-			{ ..model, collected: model.collected.insert(cell), keys_left: model.keys_left - 1 }
+		spot = { cell: model.ball.pose.cell, up: model.ball.pose.up }
+		if has_item(model.level, model.ball.pose, Key) and !model.collected.contains(spot) {
+			{ ..model, collected: model.collected.insert(spot), keys_left: model.keys_left - 1 }
 		} else {
 			model
 		}
@@ -53,7 +49,7 @@ Rules := [].{
 
 	exit : Model -> Model
 	exit = |model|
-		if model.phase == Playing and exit_open(model) and has_item(model.level, model.ball.pose.cell, Exit) {
+		if model.phase == Playing and exit_open(model) and has_item(model.level, model.ball.pose, Exit) {
 			{
 				..model,
 				phase: if model.level_number < Level.count {
@@ -81,8 +77,15 @@ parse_or_crash = |text| match Level.parse(text) {
 	Err(err) => crash "The level does not parse: ${Str.inspect(err)}"
 }
 
-has_item : World.Level, World.Cell, World.Item -> Bool
-has_item = |level, cell, item| level.items.any(|entry| entry.cell == cell and entry.item == item)
+start_on : World.Meshes, U64, World.Level -> Rules.Model
+start_on = |meshes, level_number, level| {
+	keys = level.items.keep_if(|entry| entry.item == Key).len()
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, collected: Set.empty(), unloads: [] }
+}
+
+# An item counts only for a ball on its face: two items can share a cell on different faces.
+has_item : World.Level, World.Pose, World.Item -> Bool
+has_item = |level, pose, item| level.items.any(|entry| entry.cell == pose.cell and entry.up == pose.up and entry.item == item)
 
 meshes : World.Meshes
 meshes = { cube: 1, face: 5, ball: 4, sky: 1 }
@@ -109,7 +112,7 @@ expect {
 
 expect {
 	model = Rules.collect(at(Rules.start(meshes, 1), first_key))
-	model.keys_left == 1 and model.collected.contains(first_key)
+	model.keys_left == 1 and model.collected.contains({ cell: first_key, up: cell(0, 1, 0) })
 }
 
 # Standing on a collected key does not count it twice.
@@ -173,3 +176,23 @@ expect {
 	ball = { ..model.ball, motion: Falling({ from: model.level.start, offset: 0.0, over: model.level.start, drop: Off(3), seconds: 1.0, spin_rate: 0.0 }) }
 	Rules.fall({ ..model, ball }).phase == Cleared
 }
+
+# The cell (0, 1, 0) holds a key on the +y face of block (0, 0, 0) and an item on the -x face of block (1, 1, 0).
+two_faces : Str -> Rules.Model
+two_faces = |item| start_on(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y key\n1 1 0 -x ${item}\nstart 1 1 0 +y -z\n"))
+
+on_face : Rules.Model, World.Cell -> Rules.Model
+on_face = |model, up| { ..model, ball: Ball.start({ cell: cell(0, 1, 0), up, forward: cell(0, 0, -1) }) }
+
+expect {
+	floor = Rules.collect(on_face(two_faces("key"), cell(0, 1, 0)))
+	both = Rules.collect(on_face(floor, cell(-1, 0, 0)))
+	floor.keys_left == 1 and both.keys_left == 0 and both.collected.len() == 2 and Rules.collect(on_face(both, cell(0, 1, 0))).keys_left == 0
+}
+
+expect {
+	open = Rules.collect(on_face(two_faces("exit"), cell(0, 1, 0)))
+	open.keys_left == 0 and Rules.exit(open).phase == Playing and Rules.exit(on_face(open, cell(-1, 0, 0))).phase == Cleared
+}
+
+expect Rules.collect(on_face(two_faces("exit"), cell(-1, 0, 0))).keys_left == 1
