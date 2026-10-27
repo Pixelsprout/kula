@@ -8,5 +8,5 @@ World := [].{
 	# start time in seconds.
 	Level : { blocks : Set(Cell), items : List({ cell : Cell, up : Cell, item : Item }), start : Pose, time : U64 }
 	# The ids Kula draws with. sky is a sky id, not a mesh id.
-	Meshes : { cube : U32, sphere : U32, face : U32, ball : U32, coin : U32, apple : U32, watermelon : U32, pumpkin : U32, sky : U32 }
+	Meshes : { sphere : U32, face : U32, ball : U32, coin : U32, apple : U32, watermelon : U32, pumpkin : U32, key : U32, sky : U32 }
 }

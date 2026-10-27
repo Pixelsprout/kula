@@ -81,9 +81,10 @@ Pickup := [].{
 	shape : Kind, World.Meshes -> Shape
 	shape = |kind, meshes| (traits(kind).shape)(meshes)
 
-	# The Sound ids a pickup of this kind plays.
-	sounds : Kind, Sounds.Sounds -> List(U32)
-	sounds = |kind, ids| (traits(kind).sounds)(ids)
+	# The Sound ids a pickup of this kind plays. keys_left counts the keys
+	# left after this pickup, as the original tests numKeysRemaining.
+	sounds : Kind, Sounds.Sounds, U64 -> List(U32)
+	sounds = |kind, ids, keys_left| (traits(kind).sounds)(ids, keys_left)
 
 	glow : Kind -> List(Glow)
 	glow = |kind| traits(kind).glow
@@ -107,7 +108,7 @@ Traits : {
 	bob : F32,
 	points : U64,
 	shape : World.Meshes -> Pickup.Shape,
-	sounds : Sounds.Sounds -> List(U32),
+	sounds : Sounds.Sounds, U64 -> List(U32),
 	glow : List(Pickup.Glow),
 	add_fruit : Fruit.Fruits -> Fruit.Fruits,
 }
@@ -122,8 +123,8 @@ traits = |kind| match kind {
 		tilt_size: 0.0,
 		bob: -70.0,
 		points: 1000,
-		shape: |meshes| { mesh: meshes.cube, size: key_size, tint: key_tint },
-		sounds: |_| [],
+		shape: |meshes| { mesh: meshes.key, size: 1.0, tint: mesh_colour },
+		sounds: |ids, keys_left| if keys_left == 0 [ids.last_key] else [ids.key],
 		glow: key_glow,
 		add_fruit: |fruits| fruits,
 	}
@@ -136,7 +137,7 @@ traits = |kind| match kind {
 		bob: -70.0,
 		points: 250,
 		shape: |meshes| { mesh: meshes.coin, size: 1.0, tint: mesh_colour },
-		sounds: |ids| [ids.chime],
+		sounds: |ids, _| [ids.chime],
 		glow: key_glow,
 		add_fruit: |fruits| fruits,
 	}
@@ -149,7 +150,7 @@ traits = |kind| match kind {
 		bob: -60.0,
 		points: 2500,
 		shape: fruit_shape(fruit),
-		sounds: |ids| [ids.jingle],
+		sounds: |ids, _| [ids.jingle],
 		glow: fruit_glow,
 		add_fruit: |fruits| Fruit.collect(fruits, fruit),
 	}
@@ -164,14 +165,7 @@ fruit_shape = |fruit| |meshes| match fruit {
 	Strawberry => { mesh: meshes.sphere, size: spare_fruit_size, tint: strawberry_tint }
 }
 
-# Keys stay primitive cubes until a key mesh exists.
-key_size : F32
-key_size = 0.3
-
-key_tint : Rgb
-key_tint = { r: 1.0, g: 0.787, b: 0.033 }
-
-# coin.glb and the fruit meshes carry their own size and colour.
+# key.glb, coin.glb and the fruit meshes carry their own size and colour.
 mesh_colour : Rgb
 mesh_colour = { r: 1.0, g: 1.0, b: 1.0 }
 
@@ -279,10 +273,11 @@ expect near(Pickup.reach_squared(Coin), 35600.0 / 512.0 / 512.0) and near(Pickup
 
 expect Pickup.points(Coin) == 250
 
-# A key plays no sound, a coin the chime and a fruit the jingle.
+# A key plays the key sound, and the last key the last-key sound alone. A
+# coin plays the chime and a fruit the jingle.
 expect {
-	ids = { bounce: 1, chime: 2, tick: 3, jingle: 4 }
-	Pickup.sounds(Key, ids) == [] and Pickup.sounds(Coin, ids) == [2] and Pickup.sounds(Fruit(Pumpkin), ids) == [4]
+	ids = { bounce: 1, chime: 2, tick: 3, jingle: 4, key: 5, last_key: 6 }
+	Pickup.sounds(Key, ids, 1) == [5] and Pickup.sounds(Key, ids, 0) == [6] and Pickup.sounds(Coin, ids, 0) == [2] and Pickup.sounds(Fruit(Pumpkin), ids, 0) == [4]
 }
 
 # On a -x face the centre lifts along -x.

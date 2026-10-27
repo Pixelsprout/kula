@@ -96,13 +96,21 @@ start_same_theme = |model|
 		model
 	}
 
-# Each item the step collected plays its kind's sound.
+# Each item the step collected plays its kind's sound. The keys count down
+# in the order of the pickups, so only the key that leaves none is the last key.
 # In a step, only a pickup takes an item out of the pickups: a restart puts
 # them all back. A new level has its own pickups, and no pickup happens in its first step.
 pickup_sounds : Model, Model -> List(Command)
 pickup_sounds = |before, after| before.pickups
 	.keep_if(|pickup| before.level_number == after.level_number and !after.pickups.any(|left| left.id == pickup.id))
-	.join_map(|pickup| Pickup.sounds(pickup.kind, after.sounds).map(Sound.play))
+	.fold(
+		{ keys_left: before.keys_left, commands: [] },
+		|so_far, pickup| {
+			keys_left = if pickup.kind == Key so_far.keys_left - 1 else so_far.keys_left
+			{ keys_left, commands: so_far.commands.concat(Pickup.sounds(pickup.kind, after.sounds, keys_left).map(Sound.play)) }
+		},
+	)
+	.commands
 
 # As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
 bounce : Model, Model -> List(Command)
@@ -236,8 +244,8 @@ manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "haze_face", "sky/haze", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }).model
-	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id)])
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "haze_face", "sky/haze", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }).model
+	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("key", 10), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id), ("sound/key", key_sound_id), ("sound/last_key", last_key_id)])
 	loaded(loaded(booted, "kula", kula), "haze", manifest([("haze_face", 5), ("sky/haze", 1)]))
 }
 
@@ -253,14 +261,17 @@ tick_id = 65539
 jingle_id : U32
 jingle_id = 65540
 
+key_sound_id : U32
+key_sound_id = 65541
+
+last_key_id : U32
+last_key_id = 65542
+
 idle : Vocabulary.Input
 idle = Input.empty
 
-key_shape : Pickup.Shape
-key_shape = Pickup.shape(Key, started.meshes)
-
-key_tint : Rgb
-key_tint = key_shape.tint
+key_draws : Model -> List(Vocabulary.Draw)
+key_draws = |model| draws_in(view(model)).keep_if(|d| d.mesh == model.meshes.key)
 
 draws_in : Vocabulary.Scene -> List(Vocabulary.Draw)
 draws_in = |scene| scene.nodes.join_map(
@@ -278,10 +289,10 @@ lights_in = |scene| scene.nodes.join_map(
 	},
 )
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
-expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, sky: 0 }
-expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id }
-expect started.meshes == { cube: 1, sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 1 }
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
+expect init({ seed: 0, args: [], assets: [] }).model.meshes == { sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, key: 0, sky: 0 }
+expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
+expect started.meshes == { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
@@ -350,19 +361,19 @@ expect {
 	exit_faces.len() == 5 and exit_faces.all(|d| Vec3.length(d.pos) == 0.5)
 }
 
-# Each key bobs 120 to 160 units above its face.
+# Each key draws key.glb unscaled and untinted, and bobs 120 to 160 units above its face.
 expect {
-	keys = draws_in(view(column)).keep_if(|d| d.tint == key_tint)
+	keys = key_draws(column)
 	above = |d, face_y| d.pos.y - face_y >= 120.0 / 512.0 and d.pos.y - face_y <= 160.0 / 512.0
 	match keys {
-		[first, second] => first.pos.z == 7.0 and above(first, 0.5) and second.pos.z == 5.0 and above(second, 1.5) and keys.all(|d| d.pos.x == 0.0 and d.scale.x == key_shape.size)
+		[first, second] => first.pos.z == 7.0 and above(first, 0.5) and second.pos.z == 5.0 and above(second, 1.5) and keys.all(|d| d.pos.x == 0.0 and d.scale == Vec3.one and d.tint == { r: 1.0, g: 1.0, b: 1.0 })
 		_ => False
 	}
 }
 
 # A key moves between steps.
 expect {
-	keys_at = |model| draws_in(view(model)).keep_if(|d| d.tint == key_tint)
+	keys_at = key_draws
 	later = step(column, idle, QueryResults.empty, 0.1).model
 	keys_at(later).map(|d| d.id) == keys_at(column).map(|d| d.id) and keys_at(later).map(|d| d.pos) != keys_at(column).map(|d| d.pos) and keys_at(later).map(|d| d.rot) != keys_at(column).map(|d| d.rot)
 }
@@ -460,7 +471,7 @@ expect {
 
 expect {
 	collected = [0.13, 0.13, 0.13, 0.13].fold(column, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
-	keys = draws_in(view(collected)).keep_if(|d| d.tint == key_tint)
+	keys = key_draws(collected)
 	keys.map(|d| d.pos.z) == [5.0] and keys.map(|d| d.id) == [pickup_ids + 1]
 }
 
@@ -734,3 +745,25 @@ expect {
 	)
 	run.sounds == [Sound.play(jingle_id)] and run.model.pickups == [] and run.model.score.level == 2500 and run.model.fruits.now == [Apple] and run.model.flashes.all(|flash| flash.kind == Fruit(Apple))
 }
+
+# Two keys in a row, and no exit.
+key_run : Model
+key_run = {
+	level = Level.parse("#\n#\n#\n#\n\n0 0 2 +y key\n0 0 1 +y key\nstart 0 0 3 +y -z\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level, Apple), keys_left: Level.keys(level) }
+}
+
+# Rolling over both keys plays the key sound for the first, then only the last-key sound for the last.
+expect {
+	run = List.repeat(0.01, 60).fold(
+		{ model: key_run, sounds: [] },
+		|so_far, dt| {
+			next = step(so_far.model, up_held, QueryResults.empty, dt)
+			{ model: next.model, sounds: so_far.sounds.concat(next.commands) }
+		},
+	)
+	run.sounds == [Sound.play(key_sound_id), Sound.play(last_key_id)] and run.model.keys_left == 0
+}
+
+# Two keys taken in one step play the key sound, then the last-key sound.
+expect pickup_sounds(key_run, { ..key_run, pickups: [], keys_left: 0 }) == [Sound.play(key_sound_id), Sound.play(last_key_id)]

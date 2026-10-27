@@ -130,7 +130,7 @@ has_item : World.Level, World.Pose, World.Item -> Bool
 has_item = |level, pose, item| level.items.any(|entry| entry.cell == pose.cell and entry.up == pose.up and entry.item == item)
 
 meshes : World.Meshes
-meshes = { cube: 1, sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 1 }
+meshes = { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
 
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
@@ -339,7 +339,7 @@ expect {
 
 # The sound ids survive a restart and a new level.
 expect {
-	sounds = { bounce: 3, chime: 6, tick: 4, jingle: 5 }
+	sounds = { bounce: 3, chime: 6, tick: 4, jingle: 5, key: 7, last_key: 8 }
 	model = { ..Rules.start(meshes, 1), sounds, clock: 1 }
 	restarted = Rules.run_clock(model)
 	next = Rules.next_level({ ..model, phase: Cleared })
