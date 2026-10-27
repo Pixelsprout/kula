@@ -192,12 +192,22 @@ back and the exit closes. The fall also costs points. See Score.
 - A panel at the bottom left shows the keys collected out of the level's
   total, such as `Keys 1 / 2`. It shows in every phase.
 
+## Coins
+
+- A coin is a bronze disc on one face of a block. It spins and bobs like a
+  key, 20 units (0.04 cell) higher.
+- The ball collects a coin when the ball centre comes within 0.37 cell of
+  the coin centre. The coin adds 250 to the level score and plays a chime.
+- A forward jump collects a coin on the floor of the cell it jumps over only
+  when the coin is near the top of its bob. See `SPEC.md`, Items.
+- A fall brings back every coin of the level.
+
 ## Score
 
 Kula copies the original's two scores. See `SPEC.md`, Score.
 
 - The level score holds the points of the current try at the level. A key
-  adds 1000.
+  adds 1000 and a coin 250.
 - The exit adds the level score to the total score and sets the level score
   to 0.
 - A fall takes the level score and a penalty off the total score. The
@@ -222,7 +232,8 @@ carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
-   The `kula` pack holds `ball` and `sound/bounce`, which every level uses.
+   The `kula` pack holds `ball`, `coin`, `sound/bounce` and `sound/chime`,
+   which every level uses.
    It never unloads.
 2. When the ball clears a level before the last, Kula sends Load for the
    next level's Theme.
@@ -255,7 +266,7 @@ face of a block. Entries come after the last layer, one on each line:
 
 | Entry | Meaning |
 |---|---|
-| `x y z face item` | Item `key` or `exit` on face `face` of the block at `x y z` |
+| `x y z face item` | Item `key`, `coin` or `exit` on face `face` of the block at `x y z` |
 | `start x y z face forward` | The ball starts on face `face` of the block at `x y z`, facing `forward` |
 
 A face or a forward is `+x`, `-x`, `+y`, `-y`, `+z` or `-z`. The forward
@@ -327,6 +338,7 @@ cubes.
 |---|---|
 | `assets/meshes/<theme>_face.glb` | A 1 × 1 quad facing +y, one-sided, with the Theme's texture |
 | `assets/meshes/ball.glb` | A sphere of diameter 1 with eight white and red wedges |
+| `assets/meshes/coin.glb` | A bronze metal disc 0.4 wide, with a raised rim and a bevelled edge. It stands on its edge, with its faces along ±z |
 | `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky |
 
 `assets/source/make_meshes.py` builds the meshes and their textures.
@@ -339,7 +351,9 @@ Blender from this directory:
 /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_skies.py
 ```
 
-Commit the scripts and their outputs. The build does not run Blender.
+Names after `--` build only those meshes, for example
+`-- coin`. Commit the scripts and their outputs. The build does not run
+Blender.
 
 ## Sound
 
@@ -350,13 +364,15 @@ no control, so a landing in `Cleared` or `Won` makes no sound. Kula has no
 transporters yet; a landing after one must stay silent too.
 
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
-lands. `Ball.landed` decides the landing.
+lands. `Ball.landed` decides the landing. It returns one `Sound.play` with
+the chime's Sound id for each coin the step collects.
 
 | File | What it is |
 |---|---|
 | `assets/sound/bounce.wav` | The bounce, 0.2 s of 16-bit mono at 48 kHz |
+| `assets/sound/chime.wav` | The coin chime, 0.35 s: two bright notes a fifth apart |
 
-`assets/source/make_sounds.py` synthesizes it with the Python standard
+`assets/source/make_sounds.py` synthesizes them with the Python standard
 library. It does not copy the original's sound. Run it from this directory
 and commit its output:
 

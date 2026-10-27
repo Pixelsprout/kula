@@ -229,8 +229,8 @@ A table in Kula code maps each level to its Theme.
 | Sun | A sun for each world with a lens flare (`lensflare.c`) | Code | The sun is painted in the sky, in line with the Theme sun. No lens flare |
 | Distance fade | Distant faces fade toward the Theme block colour (`SetFarColor`, `render1.c`) | Inferred | No fog yet |
 | Ball shine | A specular sprite (`DrawPlayerSpecularSprites`, `render3.c`) | Code | A specular term from the ball's glTF material |
-| Pickup flash | Each item pickup starts a light effect on the item's face and a particle that sets the light's colour each frame. The light ends with the particle (`AddLightEffect` in `level_update3.c:164-315`, `particles.c:157-160`) | Code | Each key pickup starts a Point light that fades (`Flash.roc`). No particles |
-| Flash colour | Each frame sums the particle's two sprites, colour × `PARTICLE_COLOR_DATA` >> 9 (`particles.c:246-271`). Key and coin use one table (type 6 and 2, `PARTICLE_TYPE_2_6_7`, PAL data at `data_particles.c:401-432`): black, then (25, 25, 45) at frame 4, held to frame 9, grey (19, 19, 19) at frame 23, black at frame 33. A fruit (type 4, `:185-217`) peaks at (41, 30, 41) and is black by frame 24 | Code (data), Inferred (sums) | Key: the same five points, linear between them, 0.02 s a frame. Peak from 0.08 s to 0.18 s, gone at 0.66 s |
+| Pickup flash | Each item pickup starts a light effect on the item's face and a particle that sets the light's colour each frame. The light ends with the particle (`AddLightEffect` in `level_update3.c:164-315`, `particles.c:157-160`) | Code | Each key or coin pickup starts a Point light that fades (`Flash.roc`). No particles |
+| Flash colour | Each frame sums the particle's two sprites, colour × `PARTICLE_COLOR_DATA` >> 9 (`particles.c:246-271`). Key and coin use one table (type 6 and 2, `PARTICLE_TYPE_2_6_7`, PAL data at `data_particles.c:401-432`): black, then (25, 25, 45) at frame 4, held to frame 9, grey (19, 19, 19) at frame 23, black at frame 33. A fruit (type 4, `:185-217`) peaks at (41, 30, 41) and is black by frame 24 | Code (data), Inferred (sums) | Key and coin: the same five points, linear between them, 0.02 s a frame. Peak from 0.08 s to 0.18 s, gone at 0.66 s |
 | Flash reach | The item's face gets weight 2 at each corner. Each face beside it gets 2 at the near edge and 0 at the far edge, 1.5 blocks out. A wall that rises at an edge takes the place of the floor there (`light_effect.c:15-144`). The asm that applies the weights is not decompiled (`asm_light_effect.c:36`) | Code (weights) | A Point light one cell above the item's face with a range of 2 cells, so it lights 1.73 cells out across the face. It falls off faster than the original: the face edge gets 0.6 of the centre's light, one cell out 0.16 (Inferred) |
 | Flash strength | The light colour is in PS1 colour units, where 128 is a full vertex colour (`particles.c:246-271`) | Inferred | At its peak the face under the flash gets (0.39, 0.39, 0.70): the PS1 colour over 128, times the weight 2 (Inferred) |
 | Flashes at once | 32 light effects (`light_effect.c:13`) and 16 particles (`particles.c:118`) | Code | The host draws 8 Directional and Point lights (rocco `guide/scene.md`, Lights). The Theme sun and fill take 2, so 6 flashes can overlap. Past 6, the oldest flash loses its light |
@@ -240,14 +240,14 @@ A table in Kula code maps each level to its Theme.
 
 | Fact | Original | Label | Clone |
 |---|---|---|---|
-| Level entries | An object block holds one object slot for each face, so a key, the exit or the spawn can sit on any face. The spawn face sets the ball's up and a start forward. The spawn rotation then turns the forward (`SetPlayerRotation`, `src/level_update2.c:1206`, called at `:386`) | Code | An entry puts a key, the exit or the start on any face of a block. A start entry names its forward. `scripts/convert_level.py` writes the forward of the turned spawn |
+| Level entries | An object block holds one object slot for each face, so a key, the exit or the spawn can sit on any face. The spawn face sets the ball's up and a start forward. The spawn rotation then turns the forward (`SetPlayerRotation`, `src/level_update2.c:1206`, called at `:386`) | Code | An entry puts a key, a coin, the exit or the start on any face of a block. A start entry names its forward. `scripts/convert_level.py` writes the forward of the turned spawn |
 
 ## Items
 
 The original collects an item when the ball centre comes near the item
 centre. It does not test the ball's cell or face (`HandleItemTouching`,
-`src/level_update3.c:113-323`, Code). The clone copies this test for keys.
-Coins and fruit are not in the clone yet. The Original column gives their
+`src/level_update3.c:113-323`, Code). The clone copies this test for keys
+and coins. Fruit is not in the clone yet. The Original column gives its
 numbers too.
 
 | Fact | Original | Label | Clone |
@@ -255,14 +255,17 @@ numbers too.
 | When the test runs | Every frame while the player has control and the game is not paused (`level_update2.c:538-540`) | Code | Every step in `Playing`, after the ball moves (`Rules.collect`) |
 | Items tested | Every item slot on the six faces of the 3 × 3 × 3 blocks round the ball (`level_update3.c:119-131`) | Code | Every pickup in the level. The reach is less than one cell, so the result is the same (Inferred) |
 | Test | The squared distance from the ball centre to the item centre is below the item's `collisionDistance` + 10000 (`level_update3.c:138-144`) | Code | Same, in cells (`Pickup.touches`) |
-| Reach | `collisionDistance` is 22500 for a key, 25600 for a coin and 32400 for a fruit (`level_update2.c:131, 154, 188`). With the 10000, a key reaches 180 units (0.35 cell), a coin 189 (0.37) and a fruit 206 (0.40) | Code (numbers), Inferred (roots) | Key: 0.35 cell |
-| Height above the face | The item moves out from the block centre by 386 for a key or a fruit and 406 for a coin (`level_update2.c:133, 156, 191`). The face is 256 out, so a key or a fruit is 130 units above the face and a coin 150 | Code (numbers), Inferred (face) | Key: 130 units, 0.25 cell |
-| Spin | Key and coin: -90/4096 of a turn a frame about the face normal (`level_update3.c:457-466`). Fruit: +24/4096 (`:447`) | Code | Key: the same rate, 1.10 turns a second. The direction is not checked |
-| Bob | 10 + 20 sin(phase) units along the face normal. The phase changes by -70/4096 a frame for a key or a coin (`:461-462`) and by -60/4096 for a fruit (`:449-450`) | Code | Key: same. The centre moves from 120 to 160 units above the face |
+| Reach | `collisionDistance` is 22500 for a key, 25600 for a coin and 32400 for a fruit (`level_update2.c:131, 154, 188`). With the 10000, a key reaches 180 units (0.35 cell), a coin 189 (0.37) and a fruit 206 (0.40) | Code (numbers), Inferred (roots) | Key: 0.35 cell. Coin: 0.37 cell |
+| Height above the face | The item moves out from the block centre by 386 for a key or a fruit and 406 for a coin (`level_update2.c:133, 156, 191`). The face is 256 out, so a key or a fruit is 130 units above the face and a coin 150 | Code (numbers), Inferred (face) | Key: 130 units, 0.25 cell. Coin: 150 units, 0.29 cell |
+| Spin | Key and coin: -90/4096 of a turn a frame about the face normal (`level_update3.c:457-466`). Fruit: +24/4096 (`:447`) | Code | Key and coin: the same rate, 1.10 turns a second. The direction is not checked |
+| Bob | 10 + 20 sin(phase) units along the face normal. The phase changes by -70/4096 a frame for a key or a coin (`:461-462`) and by -60/4096 for a fruit (`:449-450`) | Code | Key and coin: same. A key's centre moves from 120 to 160 units above the face, a coin's from 140 to 180 |
 | Tilt | Fruit only: up to 150/4096 of a turn about an axis in the face. Its phase changes by -80/4096 a frame (`:448, 452`) | Code | `Pickup.rot` applies a tilt about the item's x axis after the spin. No item tilts yet |
 | Item centre in the test | Includes the bob. The draw code writes `itemState.pos` each frame (`level_update3.c:526-529`) | Code | Same (`Pickup.centre`) |
 | Start phases | Random, 0 to 4095, for the spin, tilt and bob of each item (`level_update2.c:209-214`) | Code | Spread by the golden ratio from the item's place in the level, so a restart looks the same |
 | After a pickup | The slot clears and the item stops drawing (`level_update3.c:316-319`) | Code | The pickup leaves `Model.pickups` and stops drawing |
+| Coin kinds | `OBJ_COIN` (`0x25`) with variant 0, 1 or 2 (`common.h:134`, `level_update3.c:231-239`). The wiki names them gold, silver and bronze. Hiro levels 1 to 3 hold only variant 2 | Code (variants), Reported (names) | The level entry `coin` is a bronze coin. No gold or silver |
+| Coin look | The model, its size and its colour are GGI data, which the C code does not hold | Code | `coin.glb` from `make_meshes.py`: a bronze metal disc 0.4 cell wide with a raised rim and a bevelled edge. It stands on its edge, so the spin about the face normal shows its face and then its edge. Kula's own design |
+| Coin sound | `SFX_COIN_COLLECTION` at volume 7000, not placed in 3D (`level_update3.c:230`, `common.h:80`) | Code | `sound/chime`, a 0.35 s two-note chime from `make_sounds.py`. Not the original's sound. One `Sound.play` for each coin a step collects |
 
 A pickup can happen at any point of a move: in a roll, a climb, a turn or
 a jump (Inferred). In a roll onto a key's cell, the ball collects the key
@@ -273,6 +276,13 @@ on that face bobs at most 0.31 cell up, so the gap is at least 0.38 cell
 and the key stays (Inferred). At the top of the jump, a key on a wall
 beside the middle cell is at most 0.33 cell from the ball centre, so the
 jump collects it (Inferred).
+
+A coin on the face of the middle cell bobs 140 to 180 units up. The jump
+reaches it only while the coin centre is more than 167 units up, in the
+upper part of its bob. So the jump collects the coin for about 39% of the
+coin's bob phases at the jump's start, and passes over it for the rest
+(Inferred, from the clone's jump curve). The original's jump curve is GGI
+data, so the original's result is not checked.
 
 ## Score
 
@@ -285,7 +295,8 @@ points, and a total below 0 ends the game (Code, `main.c:824`).
 |---|---|---|---|
 | Start | Both are 0 at a new game (`main.c:288-289`). `levelScore` goes back to 0 after each level end (`main.c:895`) | Code | `Score.zero` at a new game. The level score is 0 at each level start |
 | Key | `levelScore += 1000` (`level_update3.c:211`) | Code | Same (`Pickup.points`) |
-| Coin, fruit | 250 for a bronze coin, 2500 for a fruit (`level_update3.c:237-238, 242-296`) | Code | Not in the clone yet |
+| Coin | `levelScore += 750`, `500` or `250` for coin variant 0, 1 or 2 (`level_update3.c:228-240`) | Code | 250 for a bronze coin, the only kind (`Pickup.points`) |
+| Fruit | 2500 for a fruit (`level_update3.c:242-296`) | Code | Not in the clone yet |
 | Exit | `totalScore += levelScore` (`main.c:919`) | Code | Same (`Score.bank`). The level score goes to 0 at once, so the HUD shows the banked total in `Cleared` |
 | Death | `totalScore -= levelScore + penalty` (`main.c:913`). A fall and a time out are both deaths | Code | Same for a fall (`Score.die`) |
 | Penalty | (world × 15 + level + 1) × 50, at most 5000 (`main.c:909-911`). `curLevel` counts from 0 (`main.c:183, 876`) | Code | Level number × 50, at most 5000. Kula's level number counts from 1, and Hiro levels 1 to 3 are world 0 (Inferred) |
@@ -317,6 +328,7 @@ the banked total shows in `Cleared` and `Won`.
 - The lens flare and the motion blur on fast turns.
 - Fog.
 - The long jump, the Bouncy pill, bounce pads and the boost.
+- Gold and silver coins. Hiro levels 1 to 3 hold only bronze coins.
 
 ## Sources
 
