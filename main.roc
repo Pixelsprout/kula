@@ -114,10 +114,12 @@ pickup_sounds = |before, after| before.pickups
 	.commands
 
 # As in the original, a landing bounces only while the player has control,
-# which Kula has only in Playing. A wall or ceiling hit always bounces.
+# which Kula has only in Playing. A wall or ceiling hit bounces in any phase
+# but the level end, where the ball hides.
 bounce : Model, Model -> List(Command)
 bounce = |before, after| {
-	hit = before.level_number == after.level_number and Ball.hit(before.ball, after.ball)
+	shown = Rules.ending(before.phase) == Err(NotEnded) and Rules.ending(after.phase) == Err(NotEnded)
+	hit = shown and before.level_number == after.level_number and Ball.hit(before.ball, after.ball)
 	landed = before.phase == Playing and Ball.landed(before.ball, after.ball)
 	[hit, landed].keep_if(|plays| plays).map(|_| Sound.play(after.sounds.bounce))
 }
@@ -610,6 +612,13 @@ expect {
 	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
 	jumping = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1).model
 	[Ending(Ending.start(0)), Cleared(Ending.start(0)), Won].all(|phase| step({ ..jumping, phase }, idle, QueryResults.empty, 0.6).commands == [])
+}
+
+# After the level end the ball hides, so a wall hit plays no bounce. In Won the hit still bounces.
+expect {
+	jumped = step(blocked(".\n#\n.\n\n"), forward_jump, QueryResults.empty, 0.01).model
+	[Ending(Ending.start(0)), Cleared(Ending.start(0))].all(|phase| bounce_steps(bounces_after({ ..jumped, phase }, idle)) == [])
+		and bounce_steps(bounces_after({ ..jumped, phase: Won }, idle)).len() == 1
 }
 
 # Held Up rolls on through the cell with no step at rest.

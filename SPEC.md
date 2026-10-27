@@ -188,7 +188,7 @@ jump bounces twice: at the hit and at the landing.
 | Forward jump lands | `CheckIfPlayerLanded` (`player_movement.c:764-781`), only with control, not paused and not after a transporter | Code | `Ball.landed`, only in `Playing` |
 | Fall lands | The same, from the `FALLING` case of `CheckPlayerJumpingStuff` (`:626`) | Code | Same. A fall off the level is silent |
 | Jump in place lands | `ProcessMovement`, `JUMPING_INPLACE` (`:495-500`). No control check | Code | `Ball.landed`, only in `Playing`. Kula has no jump in place outside `Playing` |
-| Wall hit | `CheckForPlayerWallHit` (`:693`). No control check | Code | `Ball.hit`, in any phase while the level stays the same |
+| Wall hit | `CheckForPlayerWallHit` (`:693`). No control check | Code | `Ball.hit`, in any phase but `Ending` and `Cleared` while the level stays the same. The ball hides in those phases |
 | Ceiling hit | `CheckPlayerHitCeiling` (`:739`). No control check | Code | Same |
 | Moving platform | `HandleMovingPlatforms` (`level_update.c:276, 314`) | Code | Kula has no moving platforms |
 | Roll, climb, edge roll, turn | No sound | Code | Same |

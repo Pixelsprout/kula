@@ -459,8 +459,9 @@ forward jump, a jump in place, a fall or a bounce. It thuds too when a jump
 hits a wall or a ceiling, so a blocked jump thuds twice. A roll and a fall
 off the level make no sound. As in the original, a landing is silent when
 the player has no control, so a landing after the level end or in `Won`
-makes no sound, but a hit always thuds. Kula has no transporters yet; a
-landing after one must stay silent too.
+makes no sound. A hit thuds in every phase but `Ending` and `Cleared`,
+where the ball hides. Kula has no transporters yet; a landing after one must
+stay silent too.
 
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
 lands and in the step it hits. `Ball.landed` and `Ball.hit` decide them. It
