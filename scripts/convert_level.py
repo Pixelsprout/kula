@@ -109,12 +109,17 @@ OBJ_PLAYER_SPAWN_PAUSED = 0x1D
 OBJ_PLAYER_SPAWN = 0x1E
 OBJ_KEY = 0x1F
 OBJ_COIN = 0x25
+OBJ_APPLE = 0x2B
+OBJ_WATERMELON = 0x2C
+OBJ_PUMPKIN = 0x2D
+OBJ_BANANA = 0x2E
+OBJ_STRAWBERRY = 0x2F
 # Kula has only the bronze coin. Variants 0 and 1 score 750 and 500 (level_update3.c:231-239).
 COIN_BRONZE = 2
 COIN_NAMES = {0: "gold coin", 1: "silver coin"}
 # Level init swaps any of these for the first fruit not yet collected (level_update2.c:126-144),
 # so Kula's level text names only that a fruit is there.
-FRUITS = {0x2B, 0x2C, 0x2D, 0x2E, 0x2F}
+FRUITS = {OBJ_APPLE, OBJ_WATERMELON, OBJ_PUMPKIN, OBJ_BANANA, OBJ_STRAWBERRY}
 
 # Face slots and directions share one order (wiki "Directions", block_utils.c).
 DIRECTIONS = [(0, 0, -1), (1, 0, 0), (0, 1, 0), (0, -1, 0), (-1, 0, 0), (0, 0, 1)]

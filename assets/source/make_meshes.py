@@ -32,7 +32,7 @@ BALL_WEDGES = 8
 # The original's coin model is GGI data, so the shape and colour are Kula's
 # own. The coin is 0.4 cell wide.
 COIN_SEGMENTS = 48
-COIN_BRONZE = (0.7, 0.38, 0.14, 1.0)
+COIN_COLOUR = (0.7, 0.38, 0.14, 1.0)
 COIN_ROUGHNESS = 0.4
 # The engine has no environment map, so a full metal draws its flat face
 # almost black. A part metal keeps the face bronze.
@@ -227,7 +227,7 @@ def make_coin():
     mesh = bpy.data.meshes.new("coin")
     bm.to_mesh(mesh)
     bm.free()
-    mesh.materials.append(material("coin_bronze", COIN_BRONZE, COIN_ROUGHNESS, COIN_METALLIC))
+    mesh.materials.append(material("coin_bronze", COIN_COLOUR, COIN_ROUGHNESS, COIN_METALLIC))
     export(new_object("coin", mesh), "coin.glb")
 
 
@@ -242,6 +242,9 @@ FRUIT_ROUGHNESS = 0.45
 # solid patch on the right, at its FRUIT_PART_UV.
 FRUIT_BODY_U = 0.75
 FRUIT_PART_UV = {"stem": (0.875, 0.25), "leaf": (0.875, 0.75)}
+# A fruit with no leaf still paints its leaf patch this colour, so every fruit
+# texture keeps one layout.
+LEAF_GREEN = (0.1, 0.35, 0.04)
 
 # (radius, height) from the bottom pole to the top pole. Smooth curves run
 # through these points.
@@ -369,7 +372,7 @@ def leaf(bm, uv_layer, size, lift, heading, at):
 
 # body(u, v) gives the body's linear colour at angle u and profile place v,
 # each 0 to 1. A fixed seed keeps the committed files stable.
-def fruit_image(name, body, parts):
+def fruit_image(name, body, stem, leaf):
     size = FRUIT_TEXTURE_SIZE
     rng = random.Random(name)
     image = bpy.data.images.new(name, size, size, alpha=False)
@@ -381,7 +384,7 @@ def fruit_image(name, body, parts):
             if u < FRUIT_BODY_U:
                 colour = body(u / FRUIT_BODY_U, v)
             else:
-                colour = parts["stem"] if v < 0.5 else parts["leaf"]
+                colour = stem if v < 0.5 else leaf
             noise = 1.0 + rng.uniform(-0.03, 0.03)
             pixels.extend([linear_to_srgb(c * noise) for c in colour] + [1.0])
     image.pixels = pixels
@@ -399,7 +402,7 @@ def fruit_bmesh():
     return bm, bm.loops.layers.uv.new("UVMap")
 
 
-def finish_fruit(name, bm, body_faces, body, parts):
+def finish_fruit(name, bm, body_faces, body, stem, leaf=LEAF_GREEN):
     for f in body_faces:
         f.smooth = True
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
@@ -408,7 +411,7 @@ def finish_fruit(name, bm, body_faces, body, parts):
     mesh = bpy.data.meshes.new(name)
     bm.to_mesh(mesh)
     bm.free()
-    mat = texture_material(name, fruit_image(name, body, parts))
+    mat = texture_material(name, fruit_image(name, body, stem, leaf))
     mat.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = FRUIT_ROUGHNESS
     mesh.materials.append(mat)
     export(new_object(name, mesh), name + ".glb")
@@ -428,7 +431,7 @@ def make_apple():
         blush = mix(red, (0.6, 0.2, 0.02), 0.35 * max(0.0, math.cos(2.0 * math.pi * u)) * (1.0 - abs(v - 0.55) * 2.0))
         return mix(blush, (0.45, 0.42, 0.06), (v - 0.86) / 0.12)
 
-    finish_fruit("apple", bm, body_faces, body, {"stem": (0.12, 0.06, 0.02), "leaf": (0.1, 0.35, 0.04)})
+    finish_fruit("apple", bm, body_faces, body, (0.12, 0.06, 0.02), leaf=LEAF_GREEN)
 
 
 # A long watermelon with wavy dark green stripes on light green.
@@ -450,7 +453,7 @@ def make_watermelon():
         stripe = math.sin(2.0 * math.pi * (WATERMELON_STRIPES * u + wave))
         return mix((0.16, 0.36, 0.07), (0.01, 0.08, 0.01), (stripe + 0.15) / 0.3)
 
-    finish_fruit("watermelon", bm, body_faces, body, {"stem": (0.12, 0.1, 0.03), "leaf": (0.1, 0.35, 0.04)})
+    finish_fruit("watermelon", bm, body_faces, body, (0.12, 0.1, 0.03))
 
 
 # A squat orange pumpkin with deep ribs and a thick green-brown stem.
@@ -468,7 +471,7 @@ def make_pumpkin():
         orange = scaled((0.8, 0.2, 0.012), 0.55 + 0.45 * rib(2.0 * math.pi * u))
         return mix(orange, (0.25, 0.12, 0.01), (v - 0.85) / 0.15)
 
-    finish_fruit("pumpkin", bm, body_faces, body, {"stem": (0.12, 0.13, 0.03), "leaf": (0.1, 0.35, 0.04)})
+    finish_fruit("pumpkin", bm, body_faces, body, (0.12, 0.13, 0.03))
 
 
 # Each name is the stem of the .glb that its builder writes.

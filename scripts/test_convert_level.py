@@ -171,7 +171,7 @@ class ConvertTest(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_text_counts_match_the_grid(self):
-        data = level_bytes(PLAIN, RECORDS + [(0, (12, 10, 10), {0: (cl.OBJ_COIN, 0, 2), 2: (0x2E, 0)})])
+        data = level_bytes(PLAIN, RECORDS + [(0, (12, 10, 10), {0: (cl.OBJ_COIN, 0, 2), 2: (cl.OBJ_BANANA, 0)})])
         disc = self.disc([level_bytes(PLAIN[:1], RECORDS[:1]), data])
         out_path = os.path.join(self.dir.name, "level.txt")
         code, _, err = self.run_main(disc, "2", "-o", out_path)
@@ -196,7 +196,7 @@ class ConvertTest(unittest.TestCase):
         )
 
     def test_bronze_coins_and_any_fruit_write_entries(self):
-        records = RECORDS + [(0, (12, 10, 10), {0: (cl.OBJ_COIN, 0, 2), 2: (0x2E, 0)}), (0, (11, 10, 10), {0: (0x2B, 0)})]
+        records = RECORDS + [(0, (12, 10, 10), {0: (cl.OBJ_COIN, 0, 2), 2: (cl.OBJ_BANANA, 0)}), (0, (11, 10, 10), {0: (cl.OBJ_APPLE, 0)})]
         text = cl.convert(cl.parse_level(level_bytes(PLAIN, records)))
         self.assertEqual(
             text.split("\n\n")[1],
