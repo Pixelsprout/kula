@@ -2,7 +2,7 @@
 # standard library only, so it needs no Blender. Run it from anywhere:
 #   python3 assets/source/make_sounds.py
 #
-# The bounce is synthesized here, not taken from the original game. A rerun
+# Each sound is synthesized here, not taken from the original game. A rerun
 # writes the same bytes.
 
 import math
@@ -53,6 +53,30 @@ def bounce():
     return samples
 
 
+# A short bright chime for a coin: a struck note and a fifth above it a moment
+# later, each with a quieter bell partial and a tick of noise at the strike.
+def chime():
+    length = 0.35
+    noise = random.Random(37)
+    notes = [(0.0, 1318.5), (0.06, 1975.5)]
+    samples = []
+    for i in range(int(length * RATE)):
+        t = i / RATE
+        sound = 0.0
+        for start, freq in notes:
+            since = t - start
+            if since < 0.0:
+                continue
+            attack = min(since / 0.002, 1.0)
+            ring = math.exp(-since / 0.09) * math.sin(TAU * freq * since)
+            bell = 0.3 * math.exp(-since / 0.03) * math.sin(TAU * 2.76 * freq * since)
+            tick = 0.15 * math.exp(-since / 0.002) * (noise.random() * 2.0 - 1.0)
+            sound += attack * (ring + bell) + tick
+        samples.append(0.45 * tail(t, length, 0.02) * sound)
+    return samples
+
+
 folder = os.path.join(ASSETS, "sound")
 os.makedirs(folder, exist_ok=True)
 write(os.path.join(folder, "bounce.wav"), bounce())
+write(os.path.join(folder, "chime.wav"), chime())

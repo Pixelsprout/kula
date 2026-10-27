@@ -1,5 +1,7 @@
-# Builds each Theme's <theme>_face.glb and ball.glb for Kula. Run from the repository root:
+# Builds each Theme's <theme>_face.glb, ball.glb and the item meshes for Kula.
+# Run from the repository root:
 #   /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_meshes.py
+# Names after a "--" build only those meshes, for example "-- coin".
 #
 # Blender is +Z up. The glTF export turns that into +Y up, so a quad facing
 # Blender +Z faces glTF +Y, like the engine's primitive plane.
@@ -7,6 +9,7 @@
 import math
 import os
 import random
+import sys
 
 import bmesh
 import bpy
@@ -25,19 +28,37 @@ BALL_SEGMENTS = 32
 BALL_RINGS = 16
 BALL_WEDGES = 8
 
+# The original's coin model is GGI data, so the shape and colour are Kula's
+# own. The coin is 0.4 cell wide.
+COIN_SEGMENTS = 48
+COIN_BRONZE = (0.7, 0.38, 0.14, 1.0)
+COIN_ROUGHNESS = 0.4
+# The engine has no environment map, so a full metal draws its flat face
+# almost black. A part metal keeps the face bronze.
+COIN_METALLIC = 0.4
+# (radius, height above the middle plane) from the centre of one face out to
+# the middle of the edge: the flat field, the raised rim and the bevel. The
+# other face mirrors it.
+COIN_PROFILE = [
+    (0.0, 0.016),
+    (0.15, 0.016),
+    (0.158, 0.028),
+    (0.18, 0.028),
+    (0.2, 0.012),
+]
+
 
 def clear_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
-# The export writes metallicFactor 0 and the roughness as roughnessFactor.
-def material(name, colour, roughness=0.5):
+def material(name, colour, roughness=0.5, metallic=0.0):
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     mat.use_backface_culling = True
     bsdf = mat.node_tree.nodes["Principled BSDF"]
     bsdf.inputs["Base Color"].default_value = colour
-    bsdf.inputs["Metallic"].default_value = 0.0
+    bsdf.inputs["Metallic"].default_value = metallic
     bsdf.inputs["Roughness"].default_value = roughness
     return mat
 
@@ -174,7 +195,55 @@ def make_ball():
     export(new_object("ball", mesh), "ball.glb")
 
 
+# A disc on its edge, so the spin about the face normal shows its face and
+# then its edge. Its axis is Blender Y, so glTF +Y runs up the face. The
+# profile's corners stay sharp.
+def make_coin():
+    clear_scene()
+    profile = COIN_PROFILE + [(r, -h) for r, h in reversed(COIN_PROFILE)]
+    bm = bmesh.new()
+    rings = []
+    for r, h in profile:
+        if r == 0.0:
+            rings.append([bm.verts.new((0.0, h, 0.0))])
+            continue
+        angles = [2.0 * math.pi * i / COIN_SEGMENTS for i in range(COIN_SEGMENTS)]
+        rings.append([bm.verts.new((r * math.cos(a), h, r * math.sin(a))) for a in angles])
+    for a, b in zip(rings, rings[1:]):
+        for i in range(COIN_SEGMENTS):
+            j = (i + 1) % COIN_SEGMENTS
+            if len(a) == 1:
+                bm.faces.new((a[0], b[i], b[j]))
+            elif len(b) == 1:
+                bm.faces.new((a[i], b[0], a[j]))
+            else:
+                bm.faces.new((a[i], b[i], b[j], a[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:
+        f.smooth = True
+    for e in bm.edges:
+        e.smooth = e.calc_face_angle(0.0) < math.radians(30.0)
+    mesh = bpy.data.meshes.new("coin")
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(material("coin_bronze", COIN_BRONZE, COIN_ROUGHNESS, COIN_METALLIC))
+    export(new_object("coin", mesh), "coin.glb")
+
+
+# Each name is the stem of the .glb that its builder writes.
+BUILDERS = {name + "_face": (lambda theme=(name, texel, noise): make_face(*theme)) for name, texel, noise in THEMES}
+BUILDERS["ball"] = make_ball
+BUILDERS["coin"] = make_coin
+
+
+def chosen(argv):
+    names = argv[argv.index("--") + 1:] if "--" in argv else list(BUILDERS)
+    unknown = [name for name in names if name not in BUILDERS]
+    if unknown:
+        raise SystemExit("make_meshes.py: no mesh named " + ", ".join(unknown))
+    return names
+
+
 os.makedirs(MESHES, exist_ok=True)
-for theme in THEMES:
-    make_face(*theme)
-make_ball()
+for name in chosen(sys.argv):
+    BUILDERS[name]()
