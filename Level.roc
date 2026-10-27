@@ -9,6 +9,9 @@ Level := [].{
 	count : U64
 	count = texts.len()
 
+	keys : World.Level -> U64
+	keys = |level| level.items.keep_if(|entry| entry.item == Key).len()
+
 	# Levels count from 1. A number past the last level gives empty text, which does not parse.
 	text : U64 -> Str
 	text = |number| texts.get(number - 1) ?? ""

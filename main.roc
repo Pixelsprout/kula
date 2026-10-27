@@ -96,19 +96,13 @@ start_same_theme = |model|
 		model
 	}
 
-# One chime for each coin and one jingle for each fruit the step collected.
+# Each item the step collected plays its kind's sound.
 # In a step, only a pickup takes an item out of the pickups: a restart puts
 # them all back. A new level has its own pickups, and no pickup happens in its first step.
 pickup_sounds : Model, Model -> List(Command)
 pickup_sounds = |before, after| before.pickups
 	.keep_if(|pickup| before.level_number == after.level_number and !after.pickups.any(|left| left.id == pickup.id))
-	.join_map(
-		|pickup| match pickup.kind {
-			Coin => [Sound.play(after.sounds.chime)]
-			Fruit(_) => [Sound.play(after.sounds.jingle)]
-			Key => []
-		},
-	)
+	.join_map(|pickup| Pickup.sounds(pickup.kind, after.sounds).map(Sound.play))
 
 # As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
 bounce : Model, Model -> List(Command)
@@ -223,9 +217,6 @@ open_exit_tint = { r: 1.0, g: 0.35, b: 0.3 }
 face_tint : Rgb
 face_tint = { r: 1.0, g: 1.0, b: 1.0 }
 
-key_tint : Rgb
-key_tint = { r: 1.0, g: 0.787, b: 0.033 }
-
 # ball.glb carries its own colours.
 playing_ball_tint : Rgb
 playing_ball_tint = { r: 1.0, g: 1.0, b: 1.0 }
@@ -233,35 +224,10 @@ playing_ball_tint = { r: 1.0, g: 1.0, b: 1.0 }
 won_ball_tint : Rgb
 won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 
-key_size : F32
-key_size = 0.3
-
-# coin.glb and the fruit meshes carry their own size and colour.
-mesh_colour : Rgb
-mesh_colour = { r: 1.0, g: 1.0, b: 1.0 }
-
-# Kula's levels never show a banana or a strawberry, so they have no mesh.
-spare_fruit_size : F32
-spare_fruit_size = 0.35
-
-banana_tint : Rgb
-banana_tint = { r: 0.95, g: 0.8, b: 0.15 }
-
-strawberry_tint : Rgb
-strawberry_tint = { r: 0.85, g: 0.05, b: 0.1 }
-
 pickup_draw : World.Meshes, Pickup.Pickup -> Vocabulary.Draw
 pickup_draw = |meshes, pickup| {
-	look = match pickup.kind {
-		Key => { mesh: meshes.cube, size: key_size, tint: key_tint }
-		Coin => { mesh: meshes.coin, size: 1.0, tint: mesh_colour }
-		Fruit(Apple) => { mesh: meshes.apple, size: 1.0, tint: mesh_colour }
-		Fruit(Watermelon) => { mesh: meshes.watermelon, size: 1.0, tint: mesh_colour }
-		Fruit(Pumpkin) => { mesh: meshes.pumpkin, size: 1.0, tint: mesh_colour }
-		Fruit(Banana) => { mesh: meshes.sphere, size: spare_fruit_size, tint: banana_tint }
-		Fruit(Strawberry) => { mesh: meshes.sphere, size: spare_fruit_size, tint: strawberry_tint }
-	}
-	{ ..Draw.default, id: pickup_ids + pickup.id, mesh: look.mesh, pos: Pickup.centre(pickup), rot: Pickup.rot(pickup), scale: Vec3.scale(Vec3.one, look.size), tint: look.tint }
+	shape = Pickup.shape(pickup.kind, meshes)
+	{ ..Draw.default, id: pickup_ids + pickup.id, mesh: shape.mesh, pos: Pickup.centre(pickup), rot: Pickup.rot(pickup), scale: Vec3.scale(Vec3.one, shape.size), tint: shape.tint }
 }
 
 manifest : List((Str, U32)) -> Manifest
@@ -289,6 +255,12 @@ jingle_id = 65540
 
 idle : Vocabulary.Input
 idle = Input.empty
+
+key_shape : Pickup.Shape
+key_shape = Pickup.shape(Key, started.meshes)
+
+key_tint : Rgb
+key_tint = key_shape.tint
 
 draws_in : Vocabulary.Scene -> List(Vocabulary.Draw)
 draws_in = |scene| scene.nodes.join_map(
@@ -321,9 +293,8 @@ expect step(started, up_held, QueryResults.empty, 0.13).model.ball.motion == Rol
 expect step(started, { ..idle, pressed: [Key.code(Left)] }, QueryResults.empty, 0.16).model.ball.turn == Turning({ from: started.level.start, t: 0.5, next: Stay })
 expect step(started, { ..idle, held: [Key.code(Left)] }, QueryResults.empty, 0.16).model.ball.turn == Steady
 
-# Kula's first level before the Hiro levels: one column with a wall, a raised
-# block and a gap. The tests of moves and drawing play on it. A fall from it
-# restarts the real level 1.
+# One column with a wall, a raised block and a gap, for the tests of moves
+# and drawing. A fall from it restarts level 1.
 column : Model
 column = {
 	level = Level.parse("E\n#\n#\n.\n#\n#\n#\nK\n#\nS\n\n.\n.\n.\n.\n.\nK\n#\n.\n.\n.\n") ?? started.level
@@ -384,7 +355,7 @@ expect {
 	keys = draws_in(view(column)).keep_if(|d| d.tint == key_tint)
 	above = |d, face_y| d.pos.y - face_y >= 120.0 / 512.0 and d.pos.y - face_y <= 160.0 / 512.0
 	match keys {
-		[first, second] => first.pos.z == 7.0 and above(first, 0.5) and second.pos.z == 5.0 and above(second, 1.5) and keys.all(|d| d.pos.x == 0.0 and d.scale.x == key_size)
+		[first, second] => first.pos.z == 7.0 and above(first, 0.5) and second.pos.z == 5.0 and above(second, 1.5) and keys.all(|d| d.pos.x == 0.0 and d.scale.x == key_shape.size)
 		_ => False
 	}
 }
@@ -691,7 +662,7 @@ coin_run = {
 expect {
 	coins = draws_in(view(coin_run)).keep_if(|d| d.mesh == coin_run.meshes.coin)
 	match coins {
-		[coin] => coin.id == pickup_ids and coin.pos.z == 1.0 and coin.pos.y - 0.5 >= 140.0 / 512.0 and coin.pos.y - 0.5 <= 180.0 / 512.0 and coin.scale == Vec3.one and coin.tint == mesh_colour
+		[coin] => coin.id == pickup_ids and coin.pos.z == 1.0 and coin.pos.y - 0.5 >= 140.0 / 512.0 and coin.pos.y - 0.5 <= 180.0 / 512.0 and coin.scale == Vec3.one and coin.tint == { r: 1.0, g: 1.0, b: 1.0 }
 		_ => False
 	}
 }

@@ -5,13 +5,14 @@ import View
 import Ball
 import Clock
 import Fruit
+import Level
 
 Hud := [].{
 	ui : Rules.Model -> List(Element)
 	ui = |model| [bottom_row(model), fruit_corner(model)].concat(time(model))
 }
 
-# As in the original, the time shows at the top centre from 50 s and fades in from black.
+# As in the original, the Time panel sits at the top centre.
 time : Rules.Model -> List(Element)
 time = |model| match Clock.brightness(model.clock) {
 	Ok(shade) => [Box(Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), [Text({ ..Ui.label("Time ${Clock.shown(model.clock).to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])]
@@ -31,7 +32,7 @@ keys_share = 0.3
 
 keys : Rules.Model -> Element
 keys = |model| {
-	total = model.level.items.keep_if(|entry| entry.item == Key).len()
+	total = Level.keys(model.level)
 	collected = total - model.keys_left
 	Box(panel, [Text(Ui.label("Keys ${collected.to_str()} / ${total.to_str()}"))])
 }

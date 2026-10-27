@@ -1,16 +1,24 @@
 import linalg.Quat
 import linalg.Vec3
+import pf.Vocabulary exposing [Rgb]
 import World
 import Grid
 import Fruit
+import Sounds
 
-# An item that the ball collects by touch. A new kind adds a Kind tag and a row in look.
+# An item that the ball collects by touch. A new kind adds a Kind tag and a row in traits, plus its assets.
 Pickup := [].{
 	Kind : [Key, Coin, Fruit(Fruit.Kind)]
 
 	# spin, tilt and bob are phases in turns from 0 to 1, as the original keeps three angles for each item.
 	# id is the place among the level's pickups, so a pickup keeps it after a restart.
 	Pickup : { id : U64, cell : World.Cell, up : World.Cell, kind : Kind, spin : F32, tilt : F32, bob : F32 }
+
+	# The mesh a pickup draws with, its uniform scale and its tint.
+	Shape : { mesh : U32, size : F32, tint : Rgb }
+
+	# The light effect's colour each PAL frame, in PS1 units where 128 is full.
+	Glow : { frame : F32, r : F32, g : F32, b : F32 }
 
 	# Each fruit entry shows `fruit`, the level's fruit.
 	from_level : World.Level, Fruit.Kind -> List(Pickup.Pickup)
@@ -32,30 +40,29 @@ Pickup := [].{
 
 	advance : Pickup.Pickup, F32 -> Pickup.Pickup
 	advance = |pickup, dt| {
-		l = look(pickup.kind)
+		kind = traits(pickup.kind)
 		{
 			..pickup,
-			spin: wrap(pickup.spin + per_second(l.spin) * dt),
-			tilt: wrap(pickup.tilt + per_second(l.tilt) * dt),
-			bob: wrap(pickup.bob + per_second(l.bob) * dt),
+			spin: wrap(pickup.spin + per_second(kind.spin) * dt),
+			tilt: wrap(pickup.tilt + per_second(kind.tilt) * dt),
+			bob: wrap(pickup.bob + per_second(kind.bob) * dt),
 		}
 	}
 
 	# The centre includes the bob, and the touch test uses it, as in the original.
 	centre : Pickup.Pickup -> Vec3.Vec3
 	centre = |pickup| {
-		l = look(pickup.kind)
-		lift = cells(l.lift + bob_offset + bob_size * (tau * pickup.bob).sin())
-		Vec3.add(Grid.to_vec3(pickup.cell), Vec3.scale(Grid.to_vec3(pickup.up), lift - 0.5))
+		kind = traits(pickup.kind)
+		Grid.over_face(pickup.cell, pickup.up, cells(kind.lift + bob_offset + bob_size * (tau * pickup.bob).sin()))
 	}
 
 	# The spin turns about the face normal. The tilt turns about an axis in the face that spins with the item.
 	rot : Pickup.Pickup -> Quat.Quat
 	rot = |pickup| {
-		l = look(pickup.kind)
+		kind = traits(pickup.kind)
 		on_face = Quat.between(y_axis, Grid.to_vec3(pickup.up))
 		spin = Quat.from_axis_angle(y_axis, tau * pickup.spin)
-		tilt = Quat.from_axis_angle(x_axis, tau * l.tilt_size / 4096.0 * (tau * pickup.tilt).sin())
+		tilt = Quat.from_axis_angle(x_axis, tau * kind.tilt_size / 4096.0 * (tau * pickup.tilt).sin())
 		Quat.mul(on_face, Quat.mul(spin, tilt))
 	}
 
@@ -66,25 +73,144 @@ Pickup := [].{
 	}
 
 	reach_squared : Kind -> F32
-	reach_squared = |kind| cells(cells(look(kind).touch + ball_touch))
+	reach_squared = |kind| cells(cells(traits(kind).touch + ball_touch))
 
 	points : Kind -> U64
-	points = |kind| look(kind).points
+	points = |kind| traits(kind).points
+
+	shape : Kind, World.Meshes -> Shape
+	shape = |kind, meshes| (traits(kind).shape)(meshes)
+
+	# The Sound ids a pickup of this kind plays.
+	sounds : Kind, Sounds.Sounds -> List(U32)
+	sounds = |kind, ids| (traits(kind).sounds)(ids)
+
+	glow : Kind -> List(Glow)
+	glow = |kind| traits(kind).glow
+
+	add_fruit : Fruit.Fruits, Kind -> Fruit.Fruits
+	add_fruit = |fruits, kind| (traits(kind).add_fruit)(fruits)
 }
 
-# In the original's units, so each row copies the decomp: 512 a block,
-# 4096 a turn and one PAL frame. lift is the height of the centre above the
-# face before the bob. touch is the item's collisionDistance. spin, tilt and
-# bob are each phase's change a frame. tilt_size is the peak tilt. points
-# go to the level score.
-Look : { lift : F32, touch : F32, spin : F32, tilt : F32, tilt_size : F32, bob : F32, points : U64 }
-
-look : Pickup.Kind -> Look
-look = |kind| match kind {
-	Key => { lift: 130.0, touch: 22500.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 1000 }
-	Coin => { lift: 150.0, touch: 25600.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 250 }
-	Fruit(_) => { lift: 130.0, touch: 32400.0, spin: 24.0, tilt: -80.0, tilt_size: 150.0, bob: -60.0, points: 2500 }
+# lift, touch, spin, tilt, tilt_size and bob are in the original's units, so
+# each row copies the decomp: 512 a block, 4096 a turn and one PAL frame.
+# lift is the height of the centre above the face before the bob. touch is
+# the item's collisionDistance. spin, tilt and bob are each phase's change a
+# frame. tilt_size is the peak tilt. points go to the level score. glow is the
+# flash colour curve.
+Traits : {
+	lift : F32,
+	touch : F32,
+	spin : F32,
+	tilt : F32,
+	tilt_size : F32,
+	bob : F32,
+	points : U64,
+	shape : World.Meshes -> Pickup.Shape,
+	sounds : Sounds.Sounds -> List(U32),
+	glow : List(Pickup.Glow),
+	add_fruit : Fruit.Fruits -> Fruit.Fruits,
 }
+
+traits : Pickup.Kind -> Traits
+traits = |kind| match kind {
+	Key => {
+		lift: 130.0,
+		touch: 22500.0,
+		spin: -90.0,
+		tilt: 0.0,
+		tilt_size: 0.0,
+		bob: -70.0,
+		points: 1000,
+		shape: |meshes| { mesh: meshes.cube, size: key_size, tint: key_tint },
+		sounds: |_| [],
+		glow: key_glow,
+		add_fruit: |fruits| fruits,
+	}
+	Coin => {
+		lift: 150.0,
+		touch: 25600.0,
+		spin: -90.0,
+		tilt: 0.0,
+		tilt_size: 0.0,
+		bob: -70.0,
+		points: 250,
+		shape: |meshes| { mesh: meshes.coin, size: 1.0, tint: mesh_colour },
+		sounds: |ids| [ids.chime],
+		glow: key_glow,
+		add_fruit: |fruits| fruits,
+	}
+	Fruit(fruit) => {
+		lift: 130.0,
+		touch: 32400.0,
+		spin: 24.0,
+		tilt: -80.0,
+		tilt_size: 150.0,
+		bob: -60.0,
+		points: 2500,
+		shape: fruit_shape(fruit),
+		sounds: |ids| [ids.jingle],
+		glow: fruit_glow,
+		add_fruit: |fruits| Fruit.collect(fruits, fruit),
+	}
+}
+
+fruit_shape : Fruit.Kind -> (World.Meshes -> Pickup.Shape)
+fruit_shape = |fruit| |meshes| match fruit {
+	Apple => { mesh: meshes.apple, size: 1.0, tint: mesh_colour }
+	Watermelon => { mesh: meshes.watermelon, size: 1.0, tint: mesh_colour }
+	Pumpkin => { mesh: meshes.pumpkin, size: 1.0, tint: mesh_colour }
+	Banana => { mesh: meshes.sphere, size: spare_fruit_size, tint: banana_tint }
+	Strawberry => { mesh: meshes.sphere, size: spare_fruit_size, tint: strawberry_tint }
+}
+
+# Keys stay primitive cubes until a key mesh exists.
+key_size : F32
+key_size = 0.3
+
+key_tint : Rgb
+key_tint = { r: 1.0, g: 0.787, b: 0.033 }
+
+# coin.glb and the fruit meshes carry their own size and colour.
+mesh_colour : Rgb
+mesh_colour = { r: 1.0, g: 1.0, b: 1.0 }
+
+# Kula's levels never show a banana or a strawberry, so they have no mesh.
+spare_fruit_size : F32
+spare_fruit_size = 0.35
+
+banana_tint : Rgb
+banana_tint = { r: 0.95, g: 0.8, b: 0.15 }
+
+strawberry_tint : Rgb
+strawberry_tint = { r: 0.85, g: 0.05, b: 0.1 }
+
+# Each frame sums the colours of its particle's two sprites, as
+# ProcessAndRenderParticles in particles.c does. The last point is black.
+# Keys and coins use particle type 6 and 2, which share one table
+# (PARTICLE_TYPE_2_6_7 in data_particles.c).
+key_glow : List(Pickup.Glow)
+key_glow = [
+	{ frame: 0.0, r: 0.0, g: 0.0, b: 0.0 },
+	{ frame: 4.0, r: 25.0, g: 25.0, b: 45.0 },
+	{ frame: 9.0, r: 25.0, g: 25.0, b: 45.0 },
+	{ frame: 23.0, r: 19.0, g: 19.0, b: 19.0 },
+	{ frame: 33.0, r: 0.0, g: 0.0, b: 0.0 },
+]
+
+# A fruit uses particle type 4 (PARTICLE_TYPE_4_5_10). These points stay
+# within 1 PS1 unit of its frames.
+fruit_glow : List(Pickup.Glow)
+fruit_glow = [
+	{ frame: 0.0, r: 0.0, g: 0.0, b: 0.0 },
+	{ frame: 4.0, r: 21.0, g: 10.0, b: 21.0 },
+	{ frame: 8.0, r: 41.0, g: 30.0, b: 41.0 },
+	{ frame: 11.0, r: 41.0, g: 30.0, b: 41.0 },
+	{ frame: 13.0, r: 37.0, g: 26.0, b: 37.0 },
+	{ frame: 16.0, r: 25.0, g: 18.0, b: 25.0 },
+	{ frame: 20.0, r: 6.0, g: 5.0, b: 6.0 },
+	{ frame: 24.0, r: 0.0, g: 0.0, b: 0.0 },
+]
 
 # The original adds 10000 for the ball to every item's collisionDistance.
 ball_touch : F32
@@ -152,6 +278,12 @@ expect near(Pickup.centre({ ..floor_key, bob: 0.25 }).y, 0.5 + 160.0 / 512.0)
 expect near(Pickup.reach_squared(Coin), 35600.0 / 512.0 / 512.0) and near(Pickup.centre({ ..floor_key, kind: Coin }).y, 0.5 + 160.0 / 512.0)
 
 expect Pickup.points(Coin) == 250
+
+# A key plays no sound, a coin the chime and a fruit the jingle.
+expect {
+	ids = { bounce: 1, chime: 2, tick: 3, jingle: 4 }
+	Pickup.sounds(Key, ids) == [] and Pickup.sounds(Coin, ids) == [2] and Pickup.sounds(Fruit(Pumpkin), ids) == [4]
+}
 
 # On a -x face the centre lifts along -x.
 expect {

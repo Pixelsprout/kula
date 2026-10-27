@@ -18,16 +18,16 @@ Rules := [].{
 	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, sounds : Sounds.Sounds, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, fruits : Fruit.Fruits, flashes : List(Flash.Flash), clock : U64, unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
-	start = |meshes, level_number| start_with(meshes, level_number, Fruit.none)
+	start = |meshes, level_number| start_numbered(meshes, level_number, Fruit.none)
 
 	restart : Model -> Model
-	restart = |model| { ..start_with(model.meshes, model.level_number, Fruit.die(model.fruits)), sounds: model.sounds, score: Score.die(model.score, model.level_number) }
+	restart = |model| { ..start_numbered(model.meshes, model.level_number, Fruit.die(model.fruits)), sounds: model.sounds, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start_with(model.meshes, model.level_number + 1, model.fruits), sounds: model.sounds, score: model.score, phase: Starting(start_pause) }
+	next_level = |model| { ..start_numbered(model.meshes, model.level_number + 1, model.fruits), sounds: model.sounds, score: model.score, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
@@ -51,17 +51,19 @@ Rules := [].{
 	collect = |model|
 		if model.phase == Playing {
 			centre = Ball.centre(model.ball)
-			taken = model.pickups.keep_if(|pickup| Pickup.touches(pickup, centre))
-			keys = taken.keep_if(|pickup| pickup.kind == Key).len()
-			points = taken.fold(0, |sum, pickup| sum + Pickup.points(pickup.kind))
-			fruits = taken.fold(
-				model.fruits,
-				|so_far, pickup| match pickup.kind {
-					Fruit(kind) => Fruit.collect(so_far, kind)
-					_ => so_far
-				},
+			split = model.pickups.fold(
+				{ taken: [], left: [] },
+				|so_far, pickup|
+					if Pickup.touches(pickup, centre) {
+						{ ..so_far, taken: so_far.taken.append(pickup) }
+					} else {
+						{ ..so_far, left: so_far.left.append(pickup) }
+					},
 			)
-			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys, score: Score.add(model.score, points), fruits, flashes: model.flashes.concat(taken.map(Flash.at_pickup)) }
+			taken = split.taken
+			points = taken.fold(0, |sum, pickup| sum + Pickup.points(pickup.kind))
+			fruits = taken.fold(model.fruits, |so_far, pickup| Pickup.add_fruit(so_far, pickup.kind))
+			{ ..model, pickups: split.left, keys_left: model.keys_left - taken.keep_if(|pickup| pickup.kind == Key).len(), score: Score.add(model.score, points), fruits, flashes: model.flashes.concat(taken.map(Flash.at_pickup)) }
 		} else {
 			model
 		}
@@ -113,15 +115,14 @@ parse_or_crash = |text| match Level.parse(text) {
 	Err(err) => crash "The level does not parse: ${Str.inspect(err)}"
 }
 
-# The level shows the first fruit not in fruits.
-start_with : World.Meshes, U64, Fruit.Fruits -> Rules.Model
-start_with = |meshes, level_number, fruits| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)), fruits)
+start_numbered : World.Meshes, U64, Fruit.Fruits -> Rules.Model
+start_numbered = |meshes, level_number, fruits| start_parsed(meshes, level_number, parse_or_crash(Level.text(level_number)), fruits)
 
-start_on : World.Meshes, U64, World.Level, Fruit.Fruits -> Rules.Model
-start_on = |meshes, level_number, level, fruits| {
+# Tests pass in a level parsed from their own text. The level shows the first fruit not in fruits.
+start_parsed : World.Meshes, U64, World.Level, Fruit.Fruits -> Rules.Model
+start_parsed = |meshes, level_number, level, fruits| {
 	pickups = Pickup.from_level(level, Fruit.next(fruits))
-	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, sounds: Sounds.none, phase: Playing, keys_left: keys, pickups, score: Score.zero, fruits, flashes: [], clock: Clock.start(level.time), unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, sounds: Sounds.none, phase: Playing, keys_left: Level.keys(level), pickups, score: Score.zero, fruits, flashes: [], clock: Clock.start(level.time), unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -218,7 +219,7 @@ expect {
 
 # The cell (0, 1, 0) holds a key on the +y face of block (0, 0, 0) and an item on the -x face of block (1, 1, 0).
 two_faces : Str -> Rules.Model
-two_faces = |item| start_on(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y key\n1 1 0 -x ${item}\nstart 1 1 0 +y -z\n"), Fruit.none)
+two_faces = |item| start_parsed(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y key\n1 1 0 -x ${item}\nstart 1 1 0 +y -z\n"), Fruit.none)
 
 on_face : Rules.Model, World.Cell -> Rules.Model
 on_face = |model, up| { ..model, ball: Ball.start({ cell: cell(0, 1, 0), up, forward: cell(0, 0, -1) }) }
@@ -244,7 +245,7 @@ expect {
 
 # A forward jump from z 2 to z 0, with a key on the wall beside z 1 or on the floor of z 1.
 jump_past : Str -> Rules.Model
-jump_past = |key| start_on(meshes, 1, parse_or_crash("#.\n#.\n#.\n\n..\n.#\n..\n\n${key}\nstart 0 0 2 +y -z\n"), Fruit.none)
+jump_past = |key| start_parsed(meshes, 1, parse_or_crash("#.\n#.\n#.\n\n..\n.#\n..\n\n${key}\nstart 0 0 2 +y -z\n"), Fruit.none)
 
 jump : Rules.Model -> Rules.Model
 jump = |model| { ..model, ball: Ball.act(model.level.blocks, model.ball, Jump({ up_held: True })) }
@@ -274,9 +275,7 @@ over_coin = |bob| {
 	List.repeat(0.01, 60).fold(held, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
 }
 
-# A coin sits 20 units higher than a key and reaches 9 units further. So the
-# jump collects it near the top of its bob, 180 units up, and not near the
-# bottom, 140 units up.
+# The jump collects a coin only near the top of its bob.
 expect {
 	high = over_coin(0.25)
 	low = over_coin(0.75)
@@ -317,7 +316,7 @@ expect {
 }
 
 expect Rules.start(meshes, 1).clock == Clock.start(Clock.default_seconds)
-expect start_on(meshes, 1, parse_or_crash("S\n\ntime 45\n"), Fruit.none).clock == Clock.start(45)
+expect start_parsed(meshes, 1, parse_or_crash("S\n\ntime 45\n"), Fruit.none).clock == Clock.start(45)
 
 # The clock counts one step a step, only in Playing.
 expect Rules.run_clock(Rules.start(meshes, 1)).clock == Clock.start(Clock.default_seconds) - 1
@@ -349,7 +348,7 @@ expect {
 
 # The exit sits on the +y face of block (0, 0, 0) and a fruit on the -x face of block (1, 1, 0). The level has no keys.
 fruit_level : Fruit.Fruits -> Rules.Model
-fruit_level = |fruits| start_on(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y exit\n1 1 0 -x fruit\nstart 1 1 0 +y -z\n"), fruits)
+fruit_level = |fruits| start_parsed(meshes, 1, parse_or_crash("##\n\n.#\n\n0 0 0 +y exit\n1 1 0 -x fruit\nstart 1 1 0 +y -z\n"), fruits)
 
 on_fruit : Rules.Model -> Rules.Model
 on_fruit = |model| on_face(model, cell(-1, 0, 0))

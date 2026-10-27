@@ -10,19 +10,19 @@ Flash := [].{
 	Flash : { pos : Vec3.Vec3, age : F32, kind : Pickup.Kind }
 
 	at_pickup : Pickup.Pickup -> Flash.Flash
-	at_pickup = |pickup| { pos: Vec3.add(Grid.to_vec3(pickup.cell), Vec3.scale(Grid.to_vec3(pickup.up), height - 0.5)), age: 0.0, kind: pickup.kind }
+	at_pickup = |pickup| { pos: Grid.over_face(pickup.cell, pickup.up, height), age: 0.0, kind: pickup.kind }
 
 	# A flash ends when its light has faded to black.
 	advance : List(Flash.Flash), F32 -> List(Flash.Flash)
-	advance = |flashes, dt| flashes.map(|flash| { ..flash, age: flash.age + dt }).keep_if(|flash| flash.age < seconds(flash.kind))
+	advance = |flashes, dt| flashes.map(|flash| { ..flash, age: flash.age + dt }).keep_if(|flash| flash.age < lifetime(flash.kind))
 
 	light : Flash.Flash -> Vocabulary.Light
 	light = |flash| Light.point(flash.pos, colour(flash.kind, flash.age), range)
 
 	colour : Pickup.Kind, F32 -> Rgb
 	colour = |kind, age| {
-		ps1 = sample(glow(kind), age / pal_frame)
-		{ r: ps1.r * strength, g: ps1.g * strength, b: ps1.b * strength }
+		sampled = sample(Pickup.glow(kind), age / pal_frame)
+		{ r: sampled.r * strength, g: sampled.g * strength, b: sampled.b * strength }
 	}
 
 	# The host drops each Directional or Point light past the first 8, so the
@@ -43,50 +43,15 @@ Flash := [].{
 		newest.map(light)
 	}
 
-	seconds : Pickup.Kind -> F32
-	seconds = |kind| match glow(kind).last() {
+	lifetime : Pickup.Kind -> F32
+	lifetime = |kind| match Pickup.glow(kind).last() {
 		Ok(end) => end.frame * pal_frame
 		Err(_) => 0.0
 	}
 }
 
-# The light effect's colour each PAL frame, in PS1 units where 128 is full.
-# Each frame sums the colours of its particle's two sprites, as
-# ProcessAndRenderParticles in particles.c does. The last point is black.
-Glow : { frame : F32, r : F32, g : F32, b : F32 }
-
-glow : Pickup.Kind -> List(Glow)
-glow = |kind| match kind {
-	Fruit(_) => fruit_glow
-	_ => key_glow
-}
-
-# Keys and coins use particle type 6 and 2, which share one table
-# (PARTICLE_TYPE_2_6_7 in data_particles.c).
-key_glow : List(Glow)
-key_glow = [
-	{ frame: 0.0, r: 0.0, g: 0.0, b: 0.0 },
-	{ frame: 4.0, r: 25.0, g: 25.0, b: 45.0 },
-	{ frame: 9.0, r: 25.0, g: 25.0, b: 45.0 },
-	{ frame: 23.0, r: 19.0, g: 19.0, b: 19.0 },
-	{ frame: 33.0, r: 0.0, g: 0.0, b: 0.0 },
-]
-
-# A fruit uses particle type 4 (PARTICLE_TYPE_4_5_10). These points stay
-# within 1 PS1 unit of its frames.
-fruit_glow : List(Glow)
-fruit_glow = [
-	{ frame: 0.0, r: 0.0, g: 0.0, b: 0.0 },
-	{ frame: 4.0, r: 21.0, g: 10.0, b: 21.0 },
-	{ frame: 8.0, r: 41.0, g: 30.0, b: 41.0 },
-	{ frame: 11.0, r: 41.0, g: 30.0, b: 41.0 },
-	{ frame: 13.0, r: 37.0, g: 26.0, b: 37.0 },
-	{ frame: 16.0, r: 25.0, g: 18.0, b: 25.0 },
-	{ frame: 20.0, r: 6.0, g: 5.0, b: 6.0 },
-	{ frame: 24.0, r: 0.0, g: 0.0, b: 0.0 },
-]
-
-sample : List(Glow), F32 -> Rgb
+# The glow points run oldest first, and the last one is black.
+sample : List(Pickup.Glow), F32 -> Rgb
 sample = |glows, frame| match glows {
 	[a, b, ..] =>
 		if frame <= b.frame {
