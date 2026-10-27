@@ -23,6 +23,7 @@ import Flash
 import Level
 import Clock
 import Fruit
+import Sounds
 
 Model : Rules.Model
 
@@ -32,25 +33,12 @@ launch = |_config| { ..Launch.default, step_hz: Clock.step_hz }
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat([bounce_sound, chime_sound, tick_sound, jingle_sound]) }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat(Sounds.assets) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
 kula_pack : Str
 kula_pack = "kula"
-
-# assets/source/make_sounds.py writes the sounds.
-bounce_sound : Str
-bounce_sound = "sound/bounce"
-
-chime_sound : Str
-chime_sound = "sound/chime"
-
-tick_sound : Str
-tick_sound = "sound/tick"
-
-jingle_sound : Str
-jingle_sound = "sound/jingle"
 
 load_theme : U64 -> Command
 load_theme = |level_number| {
@@ -64,7 +52,7 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound), chime: Sound.resolve(manifest, chime_sound), tick: Sound.resolve(manifest, tick_sound), jingle: Sound.resolve(manifest, jingle_sound) }
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), sounds: Sounds.resolve(manifest) }
 	} else if model.phase == Cleared and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
@@ -116,8 +104,8 @@ pickup_sounds = |before, after| before.pickups
 	.keep_if(|pickup| before.level_number == after.level_number and !after.pickups.any(|left| left.id == pickup.id))
 	.join_map(
 		|pickup| match pickup.kind {
-			Coin => [Sound.play(after.chime)]
-			Fruit(_) => [Sound.play(after.jingle)]
+			Coin => [Sound.play(after.sounds.chime)]
+			Fruit(_) => [Sound.play(after.sounds.jingle)]
 			Key => []
 		},
 	)
@@ -126,14 +114,14 @@ pickup_sounds = |before, after| before.pickups
 bounce : Model, Model -> List(Command)
 bounce = |before, after|
 	if before.phase == Playing and Ball.landed(before.ball, after.ball) {
-		[Sound.play(after.bounce)]
+		[Sound.play(after.sounds.bounce)]
 	} else {
 		[]
 	}
 
 tick : Model, Model -> List(Command)
 tick = |before, after| match Clock.tick(before.clock, after.clock) {
-	Ok(gain) => [Play({ sound: after.tick, gain, pitch: 1.0, at: Here })]
+	Ok(gain) => [Play({ sound: after.sounds.tick, gain, pitch: 1.0, at: Here })]
 	Err(NoTick) => []
 }
 
@@ -320,9 +308,7 @@ lights_in = |scene| scene.nodes.join_map(
 
 expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, sky: 0 }
-expect init({ seed: 0, args: [], assets: [] }).model.bounce == 0 and started.bounce == bounce_id
-expect init({ seed: 0, args: [], assets: [] }).model.chime == 0 and started.chime == chime_id
-expect init({ seed: 0, args: [], assets: [] }).model.jingle == 0 and started.jingle == jingle_id
+expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id }
 expect started.meshes == { cube: 1, sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
@@ -620,10 +606,8 @@ expect {
 				and next.model.level_number == 2
 					and next.model.phase == Starting(Rules.start_pause - 0.1)
 						and next.model.meshes == started.meshes
-							and next.model.bounce == bounce_id
-								and next.model.chime == chime_id
-									and next.model.jingle == jingle_id
-										and step(next.model, idle, QueryResults.empty, 0.1).commands == []
+							and next.model.sounds == started.sounds
+								and step(next.model, idle, QueryResults.empty, 0.1).commands == []
 }
 
 # The first step of a new level plays no chime for the coins left on the old
@@ -726,7 +710,6 @@ expect {
 }
 
 expect launch({ seed: 0, args: [], assets: [] }).step_hz == 120
-expect started.tick == tick_id
 
 # In the last 20 s the clock ticks once a second, louder each time.
 expect {

@@ -6,6 +6,7 @@ import Flash
 import Score
 import Clock
 import Fruit
+import Sounds
 
 Rules := [].{
 	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
@@ -13,21 +14,20 @@ Rules := [].{
 
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
-	# bounce, chime, tick and jingle are the Sound ids of the landing bounce, the coin chime, the clock tick and the fruit jingle, 0 until the kula pack loads.
 	# clock holds the steps left.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, chime : U32, tick : U32, jingle : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, fruits : Fruit.Fruits, flashes : List(Flash.Flash), clock : U64, unloads : List(Str) }
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, sounds : Sounds.Sounds, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, fruits : Fruit.Fruits, flashes : List(Flash.Flash), clock : U64, unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_with(meshes, level_number, Fruit.none)
 
 	restart : Model -> Model
-	restart = |model| { ..start_with(model.meshes, model.level_number, Fruit.die(model.fruits)), bounce: model.bounce, chime: model.chime, tick: model.tick, jingle: model.jingle, score: Score.die(model.score, model.level_number) }
+	restart = |model| { ..start_with(model.meshes, model.level_number, Fruit.die(model.fruits)), sounds: model.sounds, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start_with(model.meshes, model.level_number + 1, model.fruits), bounce: model.bounce, chime: model.chime, tick: model.tick, jingle: model.jingle, score: model.score, phase: Starting(start_pause) }
+	next_level = |model| { ..start_with(model.meshes, model.level_number + 1, model.fruits), sounds: model.sounds, score: model.score, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
@@ -121,7 +121,7 @@ start_on : World.Meshes, U64, World.Level, Fruit.Fruits -> Rules.Model
 start_on = |meshes, level_number, level, fruits| {
 	pickups = Pickup.from_level(level, Fruit.next(fruits))
 	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, chime: 0, tick: 0, jingle: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, fruits, flashes: [], clock: Clock.start(level.time), unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, sounds: Sounds.none, phase: Playing, keys_left: keys, pickups, score: Score.zero, fruits, flashes: [], clock: Clock.start(level.time), unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -340,10 +340,11 @@ expect {
 
 # The sound ids survive a restart and a new level.
 expect {
-	model = { ..Rules.start(meshes, 1), bounce: 3, tick: 4, jingle: 5, clock: 1 }
+	sounds = { bounce: 3, chime: 6, tick: 4, jingle: 5 }
+	model = { ..Rules.start(meshes, 1), sounds, clock: 1 }
 	restarted = Rules.run_clock(model)
 	next = Rules.next_level({ ..model, phase: Cleared })
-	restarted.tick == 4 and restarted.bounce == 3 and restarted.jingle == 5 and next.tick == 4 and next.jingle == 5 and next.clock == Clock.start(Clock.default_seconds)
+	restarted.sounds == sounds and next.sounds == sounds and next.clock == Clock.start(Clock.default_seconds)
 }
 
 # The exit sits on the +y face of block (0, 0, 0) and a fruit on the -x face of block (1, 1, 0). The level has no keys.
