@@ -173,13 +173,14 @@ back and the exit closes.
 
 ## Keys and the exit
 
-- A key sits on the top face of a block. The ball collects it when a move
-  into its cell commits. A collected key disappears.
+- A key sits on one face of a block. The ball collects it when a move onto
+  that face commits: the ball's cell and up must match the key's. A
+  collected key disappears.
 - The exit is a block. It is open when the ball has collected every key.
   An open exit draws brighter than a closed one.
-- When the ball enters the cell above the open exit of level 1 or 2, the
+- When the ball moves onto the face of the open exit of level 1 or 2, the
   phase changes to `Cleared`. The next level starts. See Levels and Themes.
-- When the ball enters the cell above the open exit of level 3, the phase
+- When the ball moves onto the face of the open exit of level 3, the phase
   changes to `Won`. The ball finishes its move and stops. The ball changes
   colour.
 - In `Won`, every input except Escape does nothing.
