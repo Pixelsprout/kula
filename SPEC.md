@@ -270,6 +270,40 @@ and the key stays (Inferred). At the top of the jump, a key on a wall
 beside the middle cell is at most 0.33 cell from the ball centre, so the
 jump collects it (Inferred).
 
+## Score
+
+The original keeps two scores (`main.c:146, 153`, Code). `levelScore`
+holds the points of the current try at a level. `totalScore` holds the
+points that earlier exits banked. The original has no lives: a death costs
+points, and a total below 0 ends the game (Code, `main.c:824`).
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| Start | Both are 0 at a new game (`main.c:288-289`). `levelScore` goes back to 0 after each level end (`main.c:895`) | Code | `Score.zero` at a new game. The level score is 0 at each level start |
+| Key | `levelScore += 1000` (`level_update3.c:211`) | Code | Same (`Pickup.points`) |
+| Coin, fruit | 250 for a bronze coin, 2500 for a fruit (`level_update3.c:237-238, 242-296`) | Code | Not in the clone yet |
+| Exit | `totalScore += levelScore` (`main.c:919`) | Code | Same (`Score.bank`). The level score goes to 0 at once, so the HUD shows the banked total in `Cleared` |
+| Death | `totalScore -= levelScore + penalty` (`main.c:913`). A fall and a time out are both deaths | Code | Same for a fall (`Score.die`) |
+| Penalty | (world × 15 + level + 1) × 50, at most 5000 (`main.c:909-911`). `curLevel` counts from 0 (`main.c:183, 876`) | Code | Level number × 50, at most 5000. Kula's level number counts from 1, and Hiro levels 1 to 3 are world 0 (Inferred) |
+| Loss on a death | The try's points never join the total, and the same amount comes off it, so a death loses them twice over | Inferred | Same |
+| Below 0 | Game over. The game goes back to the first level of the world and the total to 0 (`main.c:871-884`) | Code | No game over. The total stops at 0 and the level restarts |
+| Level score on screen | Counts up: each frame it closes a fifth of the gap, plus 1 (`hud.c:136-142`) | Code | Not copied. The HUD shows the level score at once |
+
+## HUD
+
+The original draws its HUD with sprites on a 320 × 256 screen. Kula draws
+Text panels (`Hud.ui`), because the engine has no UI images. The original
+hides the HUD once a level ends (`main.c:648-680`, Code). Kula keeps it, so
+the banked total shows in `Cleared` and `Won`.
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| Keys | One icon a key, lit when collected, from x 16, y 219 (`hud.c:456-466`, `sprite_init.c:75-76`) | Code | `Keys n / total` in a panel at the bottom left |
+| Level score | 7 digits at x 100, y 218 (`hud.c:142`, `sprite_init.c:511`) | Code | `Level n` in a panel at the bottom, 30% of the way across |
+| Total score | 7 digits at x 100, y 236, under the level score (`hud.c:135`, `sprite_init.c:510`) | Code | `Score n` under `Level n` in the same panel |
+| Fruit | Five icons at the bottom right (`hud.c:468-487`) | Code | Not in the clone yet |
+| Time | An hourglass and digits at the top centre (`hud.c:270-287`) | Code | Not in the clone yet |
+
 ## Not copied
 
 - The speed-up at the start of a roll.

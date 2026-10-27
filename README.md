@@ -169,7 +169,7 @@ ground it lands when the jump ends.
 
 A fall drops the ball three cells along `-up` over 0.5 s. When the fall
 ends, the level restarts: the ball goes back to the start, the keys come
-back and the exit closes.
+back and the exit closes. The fall also costs points. See Score.
 
 ## Keys and the exit
 
@@ -189,8 +189,22 @@ back and the exit closes.
   colour.
 - In `Won`, every input except Escape does nothing.
 - A closed exit does nothing. The ball can roll over it.
-- A panel at the top-left shows the keys collected out of the level's
+- A panel at the bottom left shows the keys collected out of the level's
   total, such as `Keys 1 / 2`. It shows in every phase.
+
+## Score
+
+Kula copies the original's two scores. See `SPEC.md`, Score.
+
+- The level score holds the points of the current try at the level. A key
+  adds 1000.
+- The exit adds the level score to the total score and sets the level score
+  to 0.
+- A fall takes the level score and a penalty off the total score. The
+  penalty is 50 times the level number, at most 5000.
+- The total score does not go below 0. Kula has no game over and no lives.
+- A panel at the bottom shows `Level n` over `Score n`, 30% of the way
+  across the window, where the original draws its scores.
 
 ## Levels and Themes
 
