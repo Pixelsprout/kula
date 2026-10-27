@@ -305,7 +305,7 @@ points, and a total below 0 ends the game (Code, `main.c:824`).
 | Key | `levelScore += 1000` (`level_update3.c:211`) | Code | Same (`Pickup.points`) |
 | Coin | `levelScore += 750`, `500` or `250` for coin variant 0, 1 or 2 (`level_update3.c:228-240`) | Code | 250 for a bronze coin, the only kind (`Pickup.points`) |
 | Fruit | 2500 for a fruit (`level_update3.c:242-296`) | Code | Same (`Pickup.points`) |
-| Exit | `totalScore += levelScore` (`main.c:919`) | Code | Same (`Score.bank`). The level score goes to 0 at once, so the HUD shows the banked total in `Cleared` |
+| Exit | `totalScore += levelScore` (`main.c:919`) | Code | Same (`Score.bank`), when the level ends. See Level end |
 | Death | `totalScore -= levelScore + penalty` (`main.c:913`). A fall and a time out are both deaths | Code | Same for a fall and a time out (`Score.die`) |
 | Penalty | (world × 15 + level + 1) × 50, at most 5000 (`main.c:909-911`). `curLevel` counts from 0 (`main.c:183, 876`) | Code | Level number × 50, at most 5000. Kula's level number counts from 1, and Hiro levels 1 to 3 are world 0 (Inferred) |
 | Loss on a death | The try's points never join the total, and the same amount comes off it, so a death loses them twice over | Inferred | Same |
@@ -324,7 +324,7 @@ sum of `dt` would (Inferred).
 | Start | `startTime` × 50 frames from the level settings record (type 666). Without the record, 4950 frames, 99 s (`level_update2.c:347-351`) | Code | `time n` in the level file: n × 120 steps. Without the line, 99 s (`Clock.default_seconds`). `scripts/convert_level.py` writes the line when the record does not say 99 |
 | Hiro levels 1 to 3 | The settings record says 99 s | Code (`convert_level.py --list`) | No `time` line |
 | Rate | `SubtractLevelTimer(1)` once a frame, at the top of `ProcessPlayer` (`level_update2.c:416`) | Code | One step a step, in `Rules.run_clock`. It runs first in the step, before the ball moves and before the pickups. At 0 it restarts the level, and the rest of that step plays on the restarted level. The original plays the rest of that frame on the old level, then ends it (Inferred) |
-| When it runs | `ProcessPlayer` runs only when the game is not paused, no level end is set and the get-ready screen is not up (`main.c:581-585`) | Code | Only in `Playing`. It stops at the exit and in `Starting` |
+| When it runs | `ProcessPlayer` runs only when the game is not paused, no level end is set and the get-ready screen is not up (`main.c:581-585`) | Code | In `Playing` and `Exiting`. It stops when the level ends and in `Starting` |
 | Timer pause face, debug flag, copycat mode | The clock does not count (`level_update3.c:1145-1158`) | Code | Not in the clone |
 | At 0 | `levelEndReason = LEVEL_END_TIME_OUT` (`level_update3.c:1149-1151`). A time out is a death, the same as a fall: the same penalty and a restart of the same level (`main.c:907-914`) | Code | The level restarts with `Score.die` in the step the clock reaches 0, the same as a fall. No time-out screen |
 | After a restart | `LevelInit` sets the clock again (`level_update2.c:347-351`) | Code (`LevelInit`), Inferred (that a restart runs it) | The clock goes back to the start time |
@@ -338,12 +338,38 @@ sum of `dt` would (Inferred).
 | Lethargy pill | The clock runs 5 times as fast while it acts (`level_update3.c:1118-1121`) | Code | Not in the clone |
 | Idle bob | Speeds up as the time runs out. See Idle bob | Code | Not copied yet |
 
+## Level end
+
+The original ends a level when the ball stands on the open exit
+(`HandleSpecialCubeTypes`, `src/level_update3.c:1015-1021`, Code). The level
+end then runs a sequence until a press (`src/main.c:772-808`, Code). Kula
+copies it with the phases `Exiting`, `Ending` and `Cleared` (`Rules.Phase`).
+
+| Fact | Original | Label | Clone |
+|---|---|---|---|
+| On the exit | The test runs only while the ball is not in the air (`level_update3.c:967`, `IsPlayerInAir` at `:1160-1168`). The cell under the ball is `(finePos + 256) >> 9`, so a roll reaches the exit cell when the ball centre passes the half-cell line (`CalcWhatPlayerIsStandingOn`, `level_update2.c:878-937`) | Code | `Ball.standing`: the pose of a still ball, or of a roll's start before half way and its end after. A jump or a fall stands on nothing |
+| Landing on the exit | `onGround` is 1 only in the frame of a landing (`level_update2.c:524`, `player_movement.c:480, 793`). Then `levelWon` is set at once, and `levelEndReason` in the next frame (`level_update2.c:480-486`) | Code | A still ball on the open exit sets `Exiting(0)`, so the next step ends the level. A still ball that did not just land takes the same path. The original waits 5 frames for it (Inferred) |
+| Roll onto the exit | `movementInhibitTimer = 5` (`level_update3.c:1018-1020`). Each of those frames clears the roll, turn and jump input. The level ends when the timer reaches 0 (`level_update2.c:437-455`). The roll goes on toward the cell centre | Code | `Exiting(0.1)`. Input does nothing in `Exiting`, and held Up does not start a new roll. The level ends with the ball 0.79 of the way from the half-cell line to the cell centre, near the original's 200 of 256 units (Inferred) |
+| During the wait | `ProcessPlayer` still runs, so the clock counts (`level_update2.c:416`) and the ball collects items (`:538-540`) | Code | The clock counts and the ball collects in `Exiting` |
+| Bank | `LevelCompletedOrDied` runs once, when the level ends (`main.c:787-797`). It adds the level score to the total and saves the fruit set (`main.c:914-920`) | Code | `Score.bank` and `Fruit.bank` run when `Exiting` changes to `Ending` |
+| Ball | The ball stops drawing once the level ends (`level_update2.c:554-556`) | Code | No ball in `Ending` and `Cleared` |
+| Camera | `HandlePauseModeRotationEffect` (`level_update.c:818-848`). Each frame the view angles change by -10, +4 and +13 of 4096 about x, y and z, and the zoom phase by +15. The view looks at the centre of the level's bounding box. Its distance is the reach of the farthest block centre + 1200 + 1400 + 1000 sin(phase) units (`level_update.c:666-690`) | Code | `View.orbit`, with the same rates and distances. Kula builds the view as Rx Ry Rz and maps the axes as `scripts/convert_level.py` does (Inferred) |
+| Camera start | The view angles and the zoom phase are static. They keep their values from the last level end or pause | Code | Each level end starts from 0, which looks straight down on the level |
+| HUD | The widgets hide (`main.c:666-674`) | Code | The HUD hides in `Ending` and `Cleared` |
+| Banner | "WELL DONE" (`LoadLevelEndReasonGfx`, `level_end_screen.c:81-83`), at the top centre (`:160-162`). Its fade gains 3 a frame, up to 256: about 1.7 s. Input is blocked while it fades (`DrawBigGuiSprite`, `:284-289`) | Code | `WELL DONE` in a panel at the top centre. Its alpha rises from 0 to 1 over 256 / 3 PAL frames, 1.71 s (`Ending.banner`) |
+| Score count | The count starts at the level score and takes 100 off a frame. The summary shows the level score counted so far, and the old total plus the same amount (`UpdateScoreAtEndOfLevel`, `level_end.c:65-90`; `DrawLevelScoreSummary`, `:150-158`) | Code | `Level n` over `Score n` in a panel below the middle. Both rise by 100 a PAL frame (`Ending.counted`) |
+| Press | X during the fade or the count finishes both. A new X press after that confirms (`level_end.c:192-203`), and the next frame ends the level (`main.c:650-664, 772-776`) | Code | Space or the pad's South. A press before the banner and the count finish only finishes them (`Ending.press`) |
+| Prompt | Sprite 6 draws once the count ends (`level_end.c:157`) | Code (draw), Inferred (that it is a prompt) | `Press Space` under the scores once the banner and the count finish |
+| After the press | The next level loads | Code | `Cleared`. The next level starts in the next step, or when its Theme loads. After the last level, `Won` |
+| Sound | No sound plays at the exit | Code | No sound |
+
 ## HUD
 
 The original draws its HUD with sprites on a 320 × 256 screen. Kula draws
 Text panels (`Hud.ui`), because the engine has no UI images. The original
-hides the HUD once a level ends (`main.c:648-680`, Code). Kula keeps it, so
-the banked total shows in `Cleared` and `Won`.
+hides the HUD once a level ends (`main.c:648-680`, Code). Kula hides it in
+`Ending` and `Cleared`. See Level end. In `Won` the HUD shows the banked
+total.
 
 | Fact | Original | Label | Clone |
 |---|---|---|---|
@@ -365,6 +391,8 @@ the banked total shows in `Cleared` and `Won`.
 - Gold and silver coins. Hiro levels 1 to 3 hold only bronze coins.
 - The hourglass in the HUD, the hourglass item, Timer pause faces and the
   time-out screen.
+- The save point menu, the death screens and the game's ending. Kula shows
+  `Won` after the level end of its last level.
 - Bonus levels, the fruit bowl and the HUD's BONUS letters.
 - The fruit pickup's particle that flies to the HUD, and the 4 s that a
   fruit takes off the time-trial play time (`level_update3.c:244-252`).
