@@ -3,7 +3,6 @@ import Level
 import Ball
 import Pickup
 import Flash
-import View
 import Score
 import Clock
 import Fruit
@@ -51,7 +50,7 @@ Rules := [].{
 	collect : Model -> Model
 	collect = |model|
 		if model.phase == Playing {
-			centre = View.centre(model.ball)
+			centre = Ball.centre(model.ball)
 			taken = model.pickups.keep_if(|pickup| Pickup.touches(pickup, centre))
 			keys = taken.keep_if(|pickup| pickup.kind == Key).len()
 			points = taken.fold(0, |sum, pickup| sum + Pickup.points(pickup.kind))

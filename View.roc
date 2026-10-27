@@ -29,45 +29,13 @@ View := [].{
 	theme_meshes : World.Meshes, Manifest, Str, Str -> World.Meshes
 	theme_meshes = |meshes, manifest, face, sky| { ..meshes, face: Mesh.resolve(manifest, face), sky: Mesh.resolve(manifest, sky) }
 
-	Placement : { pos : Vec3.Vec3, up : Vec3.Vec3, forward : Vec3.Vec3 }
-
-	interpolated : Ball.Ball -> Placement
-	interpolated = |ball| {
-		placed = match ball.motion {
-			Still => placement_of(ball.pose)
-			Rolling({ from, t }) => between(from, ball.pose, t)
-			Jumping({ from, offset, t }) => lifted(jump_placement(from, offset, ball.pose, t), Ball.jump_lift(t))
-			JumpingInPlace({ t }) => lifted(placement_of(ball.pose), Ball.jump_lift(t))
-			Falling({ from, offset, over, seconds, .. }) => match Ball.fall_stage(seconds) {
-				Arc(t) => lifted(jump_placement(from, offset, over, t), Ball.jump_lift(t))
-				Dropped(cells) => lifted(placement_of(over), -cells)
-			}
-		}
-		match ball.turn {
-			Steady => placed
-			Turning({ from, t, .. }) => { ..placed, forward: between(from, ball.pose, t).forward }
-		}
-	}
-
-	# The centre rests one radius above the face. Round an edge it follows the
-	# original's path: half a cell to the edge, a quarter circle of one radius
-	# about the edge line, then half a cell down the side. The idle bob does not move it.
-	centre : Ball.Ball -> Vec3.Vec3
-	centre = |ball| match ball.motion {
-		Rolling({ from, t }) if Ball.roll_kind(from, ball.pose) == Edge => edge_centre(from, t)
-		_ => {
-			placed = View.interpolated(ball)
-			Vec3.sub(placed.pos, Vec3.scale(placed.up, 0.5 - Ball.radius))
-		}
-	}
-
 	# The idle bob squashes the ball along up, not along a spinning model axis.
 	# The centre drops as the ball squashes, so its bottom stays on the floor.
 	ball_draw : Ball.Ball, U32, Rgb -> Vocabulary.Draw
 	ball_draw = |ball, mesh, tint| {
-		up = View.interpolated(ball).up
+		up = Ball.interpolated(ball).up
 		s = bob_amount * (2.0 * pi * ball.bob).sin()
-		pos = Vec3.sub(centre(ball), Vec3.scale(up, 2.0 * s * Ball.radius))
+		pos = Vec3.sub(Ball.centre(ball), Vec3.scale(up, 2.0 * s * Ball.radius))
 		scale = Vec3.scale({ x: 1.0 + s, y: 1.0 - 2.0 * s, z: 1.0 + s }, 2.0 * Ball.radius)
 		scale_rot = Quat.mul(Quat.conjugate(ball.rot), Quat.between({ x: 0.0, y: 1.0, z: 0.0 }, up))
 		{ ..Draw.default, id: 0, mesh, pos, scale, rot: ball.rot, scale_rot, tint }
@@ -78,10 +46,10 @@ View := [].{
 	# floor does not hide the ball only because blocks draw as one-sided faces.
 	camera : Ball.Ball -> Camera
 	camera = |ball| {
-		placed = interpolated(ball)
+		placed = Ball.interpolated(ball)
 		cam_forward = Vec3.sub(Vec3.scale(placed.forward, camera_pitch.cos()), Vec3.scale(placed.up, camera_pitch.sin()))
 		cam_up = Vec3.add(Vec3.scale(placed.forward, camera_pitch.sin()), Vec3.scale(placed.up, camera_pitch.cos()))
-		eye = Vec3.add(Vec3.sub(centre(ball), Vec3.scale(cam_forward, camera_depth)), Vec3.scale(cam_up, camera_drop))
+		eye = Vec3.add(Vec3.sub(Ball.centre(ball), Vec3.scale(cam_forward, camera_depth)), Vec3.scale(cam_up, camera_drop))
 		{ eye, target: Vec3.add(eye, cam_forward), up: cam_up, fov_y: camera_fov_y }
 	}
 
@@ -161,24 +129,6 @@ pi = 3.1415927
 bob_amount : F32
 bob_amount = 200.0 / 4096.0
 
-edge_centre : World.Pose, F32 -> Vec3.Vec3
-edge_centre = |from, t| {
-	up = Grid.to_vec3(from.up)
-	forward = Grid.to_vec3(from.forward)
-	r = Ball.radius
-	edge = Vec3.add(Grid.to_vec3(Grid.sub(from.cell, from.up)), Vec3.scale(Vec3.add(up, forward), 0.5))
-	arc = pi / 2.0 * r
-	s = t * Ball.roll_length(Edge)
-	if s < 0.5 {
-		Vec3.add(edge, Vec3.add(Vec3.scale(up, r), Vec3.scale(forward, s - 0.5)))
-	} else if s < 0.5 + arc {
-		a = (s - 0.5) / r
-		Vec3.add(edge, Vec3.add(Vec3.scale(up, r * a.cos()), Vec3.scale(forward, r * a.sin())))
-	} else {
-		Vec3.sub(Vec3.add(edge, Vec3.scale(forward, r)), Vec3.scale(up, s - 0.5 - arc))
-	}
-}
-
 near_window : Camera -> List(Vec3.Vec3)
 near_window = |cam| {
 	forward = Vec3.normalize(Vec3.sub(cam.target, cam.eye))
@@ -212,25 +162,6 @@ face_rot = |normal| {
 	}
 }
 
-jump_placement : World.Pose, F32, World.Pose, F32 -> View.Placement
-jump_placement = |from, offset, to, t| {
-	placed = between(from, to, t)
-	{ ..placed, pos: Vec3.add(placed.pos, Vec3.scale(placed.forward, offset * (1.0 - t))) }
-}
-
-lifted : View.Placement, F32 -> View.Placement
-lifted = |placed, lift| { ..placed, pos: Vec3.add(placed.pos, Vec3.scale(placed.up, lift)) }
-
-placement_of : World.Pose -> View.Placement
-placement_of = |pose| { pos: Grid.to_vec3(pose.cell), up: Grid.to_vec3(pose.up), forward: Grid.to_vec3(pose.forward) }
-
-between : World.Pose, World.Pose, F32 -> View.Placement
-between = |from, to, t| {
-	a = placement_of(from)
-	b = placement_of(to)
-	{ pos: Vec3.lerp(a.pos, b.pos, t), up: Vec3.normalize(Vec3.lerp(a.up, b.up, t)), forward: Vec3.normalize(Vec3.lerp(a.forward, b.forward, t)) }
-}
-
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
 
@@ -249,42 +180,6 @@ white = { r: 1.0, g: 1.0, b: 1.0 }
 # For tests of the centre's path, which the bob would shift.
 unbobbed : Ball.Ball -> Ball.Ball
 unbobbed = |ball| { ..ball, bob: 0.0 }
-
-expect View.interpolated(Ball.start(on_origin)) == { pos: { x: 0.0, y: 1.0, z: 0.0 }, up: { x: 0.0, y: 1.0, z: 0.0 }, forward: { x: 0.0, y: 0.0, z: -1.0 } }
-
-expect {
-	half = Ball.advance(Ball.act(floor, Ball.start(on_origin), Roll), 0.13)
-	View.interpolated(half).pos == { x: 0.0, y: 1.0, z: -0.5 }
-}
-
-# Halfway round an edge, up and forward are each a unit diagonal.
-expect {
-	edge = Set.from_list([cell(0, 0, 0)])
-	placed = View.interpolated(Ball.advance(Ball.act(edge, Ball.start(on_origin), Roll), 0.17))
-	s = 0.70710678
-	near(placed.pos, { x: 0.0, y: 0.5, z: -0.5 }) and near(placed.up, { x: 0.0, y: s, z: -s }) and near(placed.forward, { x: 0.0, y: -s, z: -s })
-}
-
-# A jump peaks half a cell above the straight line at its midpoint.
-expect {
-	placed = View.interpolated(Ball.advance(Ball.act(floor, Ball.start(on_origin), Jump({ up_held: True })), 0.27))
-	near(placed.pos, { x: 0.0, y: 1.5, z: -1.0 })
-}
-
-# A jump into nothing drops to 2 cells below the lowest block.
-expect {
-	falling = Ball.act(Set.from_list([cell(0, 0, 0)]), Ball.start(on_origin), Jump({ up_held: True }))
-	near(View.interpolated(Ball.advance(falling, 2.0)).pos, { x: 0.0, y: -2.0, z: -2.0 })
-}
-
-# The drop starts where the jump arc ends, and ends on the floor below.
-expect {
-	falling = Ball.act(Set.from_list([cell(0, 0, 0), cell(0, -1, -2)]), Ball.start(on_origin), Jump({ up_held: True }))
-	at_arc_end = View.interpolated(Ball.advance(falling, 0.539)).pos
-	dropping = View.interpolated(Ball.advance(falling, 0.541)).pos
-	near_arc_end = Vec3.length(Vec3.sub(at_arc_end, { x: 0.0, y: 1.0, z: -2.0 })) < 0.01 and Vec3.length(Vec3.sub(dropping, { x: 0.0, y: 1.0, z: -2.0 })) < 0.01
-	near_arc_end and dropping.y < 1.0 and View.interpolated(Ball.advance(falling, 1.0)).pos == { x: 0.0, y: 0.0, z: -2.0 }
-}
 
 expect {
 	draw = View.ball_draw(Ball.start(on_origin), 2, white)
@@ -381,28 +276,6 @@ expect {
 	behind = Set.from_list([cell(0, 0, 0), cell(0, 0, 1), cell(0, 0, 2), cell(0, 1, -1)])
 	mid_climb = Ball.advance(Ball.act(behind, Ball.start(on_origin), Roll), 0.14)
 	View.faces(behind).all(|face| !View.cut_by_near_plane(face, View.camera(mid_climb)))
-}
-
-# A jump in place rises half a cell and comes down on the same cell.
-expect {
-	jumping_in_place = Ball.act(floor, Ball.start(on_origin), Jump({ up_held: False }))
-	near(View.interpolated(Ball.advance(jumping_in_place, 0.27)).pos, { x: 0.0, y: 1.5, z: 0.0 }) and View.interpolated(Ball.advance(jumping_in_place, 0.54)).pos == { x: 0.0, y: 1.0, z: 0.0 }
-}
-
-# A jump from a roll starts where the ball is and ends on the landing cell.
-expect {
-	long = Set.from_list([cell(0, 0, 0), cell(0, 0, -1), cell(0, 0, -2), cell(0, 0, -3)])
-	rolling = Ball.advance(Ball.act(long, Ball.start(on_origin), Roll), 0.195)
-	jumping = Ball.act(long, rolling, Jump({ up_held: False }))
-	near(View.interpolated(jumping).pos, View.interpolated(rolling).pos) and near(View.interpolated(Ball.advance(jumping, 0.54)).pos, { x: 0.0, y: 1.0, z: -3.0 })
-}
-
-# Halfway through a turn during a jump in place, the ball faces between the two directions.
-expect {
-	jumping_in_place = Ball.act(floor, Ball.start(on_origin), Jump({ up_held: False }))
-	placed = View.interpolated(Ball.advance(Ball.act(floor, jumping_in_place, TurnLeft), 0.16))
-	s = 0.70710678
-	placed.pos.y > 1.0 and near(placed.forward, { x: -s, y: 0.0, z: -s })
 }
 
 # A jump from the approach to an edge starts where the ball is.

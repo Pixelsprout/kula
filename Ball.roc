@@ -1,4 +1,5 @@
 import linalg.Quat
+import linalg.Vec3
 import World
 import Grid
 
@@ -6,7 +7,7 @@ Ball := [].{
 	# bob is the phase of the idle bob, in turns from 0 to 1.
 	Ball : { pose : World.Pose, motion : Motion, turn : Turn, rot : Quat.Quat, bob : F32 }
 
-	# The pose commits when a move starts. from, offset, over and t only serve View.
+	# The pose commits when a move starts. from, offset, over and t only serve Ball.interpolated.
 	# A jump from a roll starts offset cells along forward from from.cell.
 	# A fall jumps to over, then drops straight down. Its seconds count from the jump start.
 	# spin_rate is in radians a second. It plays the part of the original's rotX.
@@ -145,6 +146,38 @@ Ball := [].{
 			(motion, _, TurnLeft) if can_turn(motion) => turn(ball, TurnLeft)
 			(motion, _, TurnRight) if can_turn(motion) => turn(ball, TurnRight)
 			_ => ball
+		}
+	}
+
+	Placement : { pos : Vec3.Vec3, up : Vec3.Vec3, forward : Vec3.Vec3 }
+
+	interpolated : Ball.Ball -> Placement
+	interpolated = |ball| {
+		placed = match ball.motion {
+			Still => placement_of(ball.pose)
+			Rolling({ from, t }) => between(from, ball.pose, t)
+			Jumping({ from, offset, t }) => lifted(jump_placement(from, offset, ball.pose, t), Ball.jump_lift(t))
+			JumpingInPlace({ t }) => lifted(placement_of(ball.pose), Ball.jump_lift(t))
+			Falling({ from, offset, over, seconds, .. }) => match Ball.fall_stage(seconds) {
+				Arc(t) => lifted(jump_placement(from, offset, over, t), Ball.jump_lift(t))
+				Dropped(cells) => lifted(placement_of(over), -cells)
+			}
+		}
+		match ball.turn {
+			Steady => placed
+			Turning({ from, t, .. }) => { ..placed, forward: between(from, ball.pose, t).forward }
+		}
+	}
+
+	# The centre rests one radius above the face. Round an edge it follows the
+	# original's path: half a cell to the edge, a quarter circle of one radius
+	# about the edge line, then half a cell down the side. The idle bob does not move it.
+	centre : Ball.Ball -> Vec3.Vec3
+	centre = |ball| match ball.motion {
+		Rolling({ from, t }) if Ball.roll_kind(from, ball.pose) == Edge => edge_centre(from, t)
+		_ => {
+			placed = Ball.interpolated(ball)
+			Vec3.sub(placed.pos, Vec3.scale(placed.up, 0.5 - Ball.radius))
 		}
 	}
 
@@ -504,6 +537,43 @@ progress = |t, dt, seconds| {
 	}
 }
 
+edge_centre : World.Pose, F32 -> Vec3.Vec3
+edge_centre = |from, t| {
+	up = Grid.to_vec3(from.up)
+	forward = Grid.to_vec3(from.forward)
+	r = Ball.radius
+	edge = Vec3.add(Grid.to_vec3(Grid.sub(from.cell, from.up)), Vec3.scale(Vec3.add(up, forward), 0.5))
+	arc = quarter_turn * r
+	s = t * Ball.roll_length(Edge)
+	if s < 0.5 {
+		Vec3.add(edge, Vec3.add(Vec3.scale(up, r), Vec3.scale(forward, s - 0.5)))
+	} else if s < 0.5 + arc {
+		a = (s - 0.5) / r
+		Vec3.add(edge, Vec3.add(Vec3.scale(up, r * a.cos()), Vec3.scale(forward, r * a.sin())))
+	} else {
+		Vec3.sub(Vec3.add(edge, Vec3.scale(forward, r)), Vec3.scale(up, s - 0.5 - arc))
+	}
+}
+
+jump_placement : World.Pose, F32, World.Pose, F32 -> Ball.Placement
+jump_placement = |from, offset, to, t| {
+	placed = between(from, to, t)
+	{ ..placed, pos: Vec3.add(placed.pos, Vec3.scale(placed.forward, offset * (1.0 - t))) }
+}
+
+lifted : Ball.Placement, F32 -> Ball.Placement
+lifted = |placed, lift| { ..placed, pos: Vec3.add(placed.pos, Vec3.scale(placed.up, lift)) }
+
+placement_of : World.Pose -> Ball.Placement
+placement_of = |pose| { pos: Grid.to_vec3(pose.cell), up: Grid.to_vec3(pose.up), forward: Grid.to_vec3(pose.forward) }
+
+between : World.Pose, World.Pose, F32 -> Ball.Placement
+between = |from, to, t| {
+	a = placement_of(from)
+	b = placement_of(to)
+	{ pos: Vec3.lerp(a.pos, b.pos, t), up: Vec3.normalize(Vec3.lerp(a.up, b.up, t)), forward: Vec3.normalize(Vec3.lerp(a.forward, b.forward, t)) }
+}
+
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
 
@@ -838,4 +908,65 @@ expect {
 	jumping_in_place = Ball.act(floor_ahead, still, in_place)
 	rolling = Ball.act(floor_ahead, still, Roll)
 	!Ball.landed(jumping_in_place, Ball.advance(jumping_in_place, 0.54)) and !Ball.landed(rolling, Ball.advance(rolling, 0.26)) and !Ball.landed(still, still)
+}
+
+near_vec3 : Vec3.Vec3, Vec3.Vec3 -> Bool
+near_vec3 = |a, c| Vec3.length(Vec3.sub(a, c)) < 0.0001
+
+expect Ball.interpolated(Ball.start(on_origin)) == { pos: { x: 0.0, y: 1.0, z: 0.0 }, up: { x: 0.0, y: 1.0, z: 0.0 }, forward: { x: 0.0, y: 0.0, z: -1.0 } }
+
+expect {
+	half = Ball.advance(Ball.act(floor_ahead, Ball.start(on_origin), Roll), 0.13)
+	Ball.interpolated(half).pos == { x: 0.0, y: 1.0, z: -0.5 }
+}
+
+# Halfway round an edge, up and forward are each a unit diagonal.
+expect {
+	edge = blocks([cell(0, 0, 0)])
+	placed = Ball.interpolated(Ball.advance(Ball.act(edge, Ball.start(on_origin), Roll), 0.17))
+	s = 0.70710678
+	near_vec3(placed.pos, { x: 0.0, y: 0.5, z: -0.5 }) and near_vec3(placed.up, { x: 0.0, y: s, z: -s }) and near_vec3(placed.forward, { x: 0.0, y: -s, z: -s })
+}
+
+# A jump peaks half a cell above the straight line at its midpoint.
+expect {
+	placed = Ball.interpolated(Ball.advance(Ball.act(floor_ahead, Ball.start(on_origin), Jump({ up_held: True })), 0.27))
+	near_vec3(placed.pos, { x: 0.0, y: 1.5, z: -1.0 })
+}
+
+# A jump into nothing drops to 2 cells below the lowest block.
+expect {
+	falling = Ball.act(blocks([cell(0, 0, 0)]), Ball.start(on_origin), Jump({ up_held: True }))
+	near_vec3(Ball.interpolated(Ball.advance(falling, 2.0)).pos, { x: 0.0, y: -2.0, z: -2.0 })
+}
+
+# The drop starts where the jump arc ends, and ends on the floor below.
+expect {
+	falling = Ball.act(Set.from_list([cell(0, 0, 0), cell(0, -1, -2)]), Ball.start(on_origin), Jump({ up_held: True }))
+	at_arc_end = Ball.interpolated(Ball.advance(falling, 0.539)).pos
+	dropping = Ball.interpolated(Ball.advance(falling, 0.541)).pos
+	near_arc_end = Vec3.length(Vec3.sub(at_arc_end, { x: 0.0, y: 1.0, z: -2.0 })) < 0.01 and Vec3.length(Vec3.sub(dropping, { x: 0.0, y: 1.0, z: -2.0 })) < 0.01
+	near_arc_end and dropping.y < 1.0 and Ball.interpolated(Ball.advance(falling, 1.0)).pos == { x: 0.0, y: 0.0, z: -2.0 }
+}
+
+# A jump in place rises half a cell and comes down on the same cell.
+expect {
+	jumping_in_place = Ball.act(floor_ahead, Ball.start(on_origin), Jump({ up_held: False }))
+	near_vec3(Ball.interpolated(Ball.advance(jumping_in_place, 0.27)).pos, { x: 0.0, y: 1.5, z: 0.0 }) and Ball.interpolated(Ball.advance(jumping_in_place, 0.54)).pos == { x: 0.0, y: 1.0, z: 0.0 }
+}
+
+# A jump from a roll starts where the ball is and ends on the landing cell.
+expect {
+	long = Set.from_list([cell(0, 0, 0), cell(0, 0, -1), cell(0, 0, -2), cell(0, 0, -3)])
+	rolling = Ball.advance(Ball.act(long, Ball.start(on_origin), Roll), 0.195)
+	jumping = Ball.act(long, rolling, Jump({ up_held: False }))
+	near_vec3(Ball.interpolated(jumping).pos, Ball.interpolated(rolling).pos) and near_vec3(Ball.interpolated(Ball.advance(jumping, 0.54)).pos, { x: 0.0, y: 1.0, z: -3.0 })
+}
+
+# Halfway through a turn during a jump in place, the ball faces between the two directions.
+expect {
+	jumping_in_place = Ball.act(floor_ahead, Ball.start(on_origin), Jump({ up_held: False }))
+	placed = Ball.interpolated(Ball.advance(Ball.act(floor_ahead, jumping_in_place, TurnLeft), 0.16))
+	s = 0.70710678
+	placed.pos.y > 1.0 and near_vec3(placed.forward, { x: -s, y: 0.0, z: -s })
 }
