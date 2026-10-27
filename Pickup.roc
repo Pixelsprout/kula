@@ -63,17 +63,21 @@ Pickup := [].{
 
 	reach_squared : Kind -> F32
 	reach_squared = |kind| cells(cells(look(kind).touch + ball_touch))
+
+	points : Kind -> U64
+	points = |kind| look(kind).points
 }
 
 # In the original's units, so each row copies the decomp: 512 a block,
 # 4096 a turn and one PAL frame. lift is the height of the centre above the
 # face before the bob. touch is the item's collisionDistance. spin, tilt and
-# bob are each phase's change a frame. tilt_size is the peak tilt.
-Look : { lift : F32, touch : F32, spin : F32, tilt : F32, tilt_size : F32, bob : F32 }
+# bob are each phase's change a frame. tilt_size is the peak tilt. points
+# go to the level score.
+Look : { lift : F32, touch : F32, spin : F32, tilt : F32, tilt_size : F32, bob : F32, points : U64 }
 
 look : Pickup.Kind -> Look
 look = |kind| match kind {
-	Key => { lift: 130.0, touch: 22500.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0 }
+	Key => { lift: 130.0, touch: 22500.0, spin: -90.0, tilt: 0.0, tilt_size: 0.0, bob: -70.0, points: 1000 }
 }
 
 # The original adds 10000 for the ball to every item's collisionDistance.

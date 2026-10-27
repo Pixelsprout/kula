@@ -3,6 +3,7 @@ import Level
 import Ball
 import Pickup
 import View
+import Score
 
 Rules := [].{
 	# Cleared waits for the next level's Theme to load. Starting holds the seconds left before the new level plays.
@@ -11,19 +12,19 @@ Rules := [].{
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
 	# bounce is the Sound id of the landing bounce, 0 until the kula pack loads.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), unloads : List(Str) }
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, bounce : U32, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_on(meshes, level_number, parse_or_crash(Level.text(level_number)))
 
 	restart : Model -> Model
-	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce }
+	restart = |model| { ..start(model.meshes, model.level_number), bounce: model.bounce, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, phase: Starting(start_pause) }
+	next_level = |model| { ..start(model.meshes, model.level_number + 1), bounce: model.bounce, score: model.score, phase: Starting(start_pause) }
 
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
@@ -46,7 +47,8 @@ Rules := [].{
 			centre = View.centre(model.ball)
 			taken = model.pickups.keep_if(|pickup| Pickup.touches(pickup, centre))
 			keys = taken.keep_if(|pickup| pickup.kind == Key).len()
-			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys }
+			points = taken.fold(0, |sum, pickup| sum + Pickup.points(pickup.kind))
+			{ ..model, pickups: model.pickups.keep_if(|pickup| !Pickup.touches(pickup, centre)), keys_left: model.keys_left - keys, score: Score.add(model.score, points) }
 		} else {
 			model
 		}
@@ -59,6 +61,7 @@ Rules := [].{
 		if model.phase == Playing and exit_open(model) and has_item(model.level, model.ball.pose, Exit) {
 			{
 				..model,
+				score: Score.bank(model.score),
 				phase: if model.level_number < Level.count {
 					Cleared
 				} else {
@@ -88,7 +91,7 @@ start_on : World.Meshes, U64, World.Level -> Rules.Model
 start_on = |meshes, level_number, level| {
 	pickups = Pickup.from_level(level)
 	keys = pickups.keep_if(|pickup| pickup.kind == Key).len()
-	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, bounce: 0, phase: Playing, keys_left: keys, pickups, score: Score.zero, unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -233,4 +236,31 @@ expect {
 	model = jump(jump_past("0 0 1 +y key"))
 	landed = List.repeat(0.01, 60).fold(model, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
 	landed.ball.motion == Still and landed.ball.pose.cell == cell(0, 1, 0) and landed.keys_left == 1
+}
+
+off_the_level : Rules.Model -> Rules.Model
+off_the_level = |model| { ..model, ball: { ..model.ball, motion: Falling({ from: model.level.start, offset: 0.0, over: model.level.start, drop: Off(3), seconds: 1.0, spin_rate: 0.0 }) } }
+
+# A key adds 1000 to the level score and nothing to the total.
+expect Rules.collect(at(Rules.start(meshes, 1), first_key)).score == { level: 1000, total: 0 }
+
+# The exit banks the level score, and the next level starts from the banked total.
+expect {
+	open = { ..at(Rules.start(meshes, 1), exit_cell), keys_left: 0, score: { level: 2000, total: 500 } }
+	cleared = Rules.exit(open)
+	cleared.score == { level: 0, total: 2500 } and Rules.next_level(cleared).score == { level: 0, total: 2500 }
+}
+
+expect {
+	last = { ..at(Rules.start(meshes, 3), exit_cell), keys_left: 0, score: { level: 1000, total: 0 } }
+	Rules.exit(last).score == { level: 0, total: 1000 }
+}
+
+# A death on level 2 loses the level score and a penalty of 100.
+expect Rules.fall(off_the_level({ ..Rules.start(meshes, 2), score: { level: 1000, total: 5000 } })).score == { level: 0, total: 3900 }
+
+# A death with too little banked leaves the total at 0.
+expect {
+	first_try = Rules.collect(at(Rules.start(meshes, 1), first_key))
+	Rules.fall(off_the_level(first_try)).score == Score.zero
 }
