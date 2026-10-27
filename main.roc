@@ -78,7 +78,7 @@ loaded = |model, pack, manifest| {
 step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
-	stages = [start_same_theme, Rules.count_down(dt), read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.run_clock, Rules.exit, Rules.fall]
+	stages = [start_same_theme, Rules.count_down(dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
@@ -742,10 +742,11 @@ expect {
 	finished.phase == Cleared and finished.clock == Clock.start(5) and step(finished, idle, QueryResults.empty, 0.1).commands == []
 }
 
-# At 0 the level restarts, with no tick.
+# At 0 the level restarts with a full clock and no tick. The rest of that step plays on the restarted level.
 expect {
 	last_step = step({ ..started, clock: 1 }, up_held, QueryResults.empty, 0.01)
-	last_step.model == started and last_step.commands == []
+	fresh = step(started, up_held, QueryResults.empty, 0.01).model
+	last_step.model == { ..fresh, clock: Clock.start(Clock.default_seconds) } and last_step.commands == []
 }
 
 # The coin run with a fruit in place of the coin.

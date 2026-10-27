@@ -323,7 +323,7 @@ sum of `dt` would (Inferred).
 |---|---|---|---|
 | Start | `startTime` × 50 frames from the level settings record (type 666). Without the record, 4950 frames, 99 s (`level_update2.c:347-351`) | Code | `time n` in the level file: n × 120 steps. Without the line, 99 s (`Clock.default_seconds`). `scripts/convert_level.py` writes the line when the record does not say 99 |
 | Hiro levels 1 to 3 | The settings record says 99 s | Code (`convert_level.py --list`) | No `time` line |
-| Rate | `SubtractLevelTimer(1)` once a frame, at the top of `ProcessPlayer` (`level_update2.c:416`) | Code | One step a step, in `Rules.run_clock`. It runs after the pickups and before the exit test |
+| Rate | `SubtractLevelTimer(1)` once a frame, at the top of `ProcessPlayer` (`level_update2.c:416`) | Code | One step a step, in `Rules.run_clock`. It runs first in the step, before the ball moves and before the pickups. At 0 it restarts the level, and the rest of that step plays on the restarted level. The original plays the rest of that frame on the old level, then ends it (Inferred) |
 | When it runs | `ProcessPlayer` runs only when the game is not paused, no level end is set and the get-ready screen is not up (`main.c:581-585`) | Code | Only in `Playing`. It stops at the exit and in `Starting` |
 | Timer pause face, debug flag, copycat mode | The clock does not count (`level_update3.c:1145-1158`) | Code | Not in the clone |
 | At 0 | `levelEndReason = LEVEL_END_TIME_OUT` (`level_update3.c:1149-1151`). A time out is a death, the same as a fall: the same penalty and a restart of the same level (`main.c:907-914`) | Code | The level restarts with `Score.die` in the step the clock reaches 0, the same as a fall. No time-out screen |
