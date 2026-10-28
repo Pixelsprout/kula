@@ -5,6 +5,7 @@ import World
 import Grid
 import Fruit
 import Sounds
+import Clock
 
 # An item that the ball collects by touch. A new kind adds a Kind tag and a row in traits, plus its assets.
 Pickup := [].{
@@ -221,7 +222,7 @@ cells : F32 -> F32
 cells = |units| units / 512.0
 
 per_second : F32 -> F32
-per_second = |per_frame| per_frame / 4096.0 / 0.02
+per_second = |per_frame| per_frame / 4096.0 / Clock.pal_frame
 
 # The original starts each phase at random. Kula spreads them by the golden
 # ratio instead, so a restart looks the same.
@@ -276,7 +277,7 @@ expect Pickup.points(Coin) == 250
 # A key plays the key sound, and the last key the last-key sound alone. A
 # coin plays the chime and a fruit the jingle.
 expect {
-	ids = { bounce: 1, chime: 2, tick: 3, jingle: 4, key: 5, last_key: 6 }
+	ids = { ..Sounds.none, chime: 2, jingle: 4, key: 5, last_key: 6 }
 	Pickup.sounds(Key, ids, 1) == [5] and Pickup.sounds(Key, ids, 0) == [6] and Pickup.sounds(Coin, ids, 0) == [2] and Pickup.sounds(Fruit(Pumpkin), ids, 0) == [4]
 }
 

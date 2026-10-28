@@ -78,6 +78,9 @@ Rules := [].{
 		_ => Err(NotEnded)
 	}
 
+	ended : Phase -> Bool
+	ended = |phase| Rules.ending(phase) != Err(NotEnded)
+
 	cleared : Phase -> Bool
 	cleared = |phase| match phase {
 		Cleared(_) => True
@@ -154,7 +157,7 @@ Rules := [].{
 	fall : Model -> Model
 	# After the level end, a restart would take back the banked score. In Cleared
 	# it would also leave the next Theme's pack loaded with no level to take it.
-	fall = |model| if Rules.ending(model.phase) == Err(NotEnded) and Ball.fell_off(model.ball) {
+	fall = |model| if !Rules.ended(model.phase) and Ball.fell_off(model.ball) {
 		restart(model)
 	} else {
 		model
@@ -269,7 +272,6 @@ expect {
 	Rules.exit(at(open, last_exit_cell)).phase == Exiting(0.0) and Rules.exit(open).phase == Playing
 }
 
-# A roll from (0, 1, 1) onto the open exit at roll progress t.
 rolling_onto_exit : F32 -> Rules.Model
 rolling_onto_exit = |t| {
 	open = { ..at(Rules.start(meshes, 1), exit_cell), keys_left: 0 }
@@ -353,6 +355,8 @@ expect {
 
 expect Rules.collect(on_face(two_faces("exit"), cell(-1, 0, 0))).keys_left == 1
 
+expect [Ending(Ending.start(0)), Cleared(Ending.start(0))].all(Rules.ended) and ![Playing, Exiting(0.1), Starting(1.0), Won].any(Rules.ended)
+
 # Without control the ball collects nothing. In the frames before an exit ends the level, it still collects.
 expect {
 	on_key = at(Rules.start(meshes, 1), key_cell)
@@ -377,10 +381,13 @@ expect {
 	}
 }
 
+# Steps of 0.01 s that move the ball and collect, until a jump has landed.
+fly : Rules.Model -> Rules.Model
+fly = |model| List.repeat(0.01, 60).fold(model, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
+
 # The ball passes half a cell over the floor key, out of its reach, so the key stays.
 expect {
-	model = jump(jump_past("0 0 1 +y key"))
-	landed = List.repeat(0.01, 60).fold(model, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
+	landed = fly(jump(jump_past("0 0 1 +y key")))
 	landed.ball.motion == Still and landed.ball.pose.cell == cell(0, 1, 0) and landed.keys_left == 1
 }
 
@@ -388,8 +395,7 @@ expect {
 over_coin : F32 -> Rules.Model
 over_coin = |bob| {
 	model = jump(jump_past("0 0 1 +y coin"))
-	held = { ..model, pickups: model.pickups.map(|pickup| { ..pickup, bob }) }
-	List.repeat(0.01, 60).fold(held, |m, dt| Rules.collect({ ..m, ball: Ball.advance(m.ball, dt) }))
+	fly({ ..model, pickups: model.pickups.map(|pickup| { ..pickup, bob }) })
 }
 
 # The jump collects a coin only near the top of its bob.
@@ -457,7 +463,7 @@ expect {
 
 # The sound ids survive a restart and a new level.
 expect {
-	sounds = { bounce: 3, chime: 6, tick: 4, jingle: 5, key: 7, last_key: 8 }
+	sounds = { ..Sounds.none, bounce: 3, chime: 6, tick: 4 }
 	model = { ..Rules.start(meshes, 1), sounds, clock: 1 }
 	restarted = Rules.run_clock(model)
 	next = Rules.next_level({ ..model, phase: Cleared(Ending.start(0)) })

@@ -149,7 +149,7 @@ end_texts = |model| match Hud.ui(model) {
 	_ => []
 }
 
-# The ball reached the exit of level 1 with 3000 points, and the exit banked them on a total of 2000.
+# Level 1's level end, seconds after it starts, with 3000 points banked.
 ended : F32 -> Rules.Model
 ended = |seconds| {
 	start = Rules.start(View.primitive_meshes, 1)

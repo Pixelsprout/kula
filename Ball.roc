@@ -2,6 +2,7 @@ import linalg.Quat
 import linalg.Vec3
 import World
 import Grid
+import Clock
 
 Ball := [].{
 	# bob is the phase of the idle bob, in turns from 0 to 1.
@@ -539,21 +540,24 @@ advance_squish = |ball, dt| match ball.squish {
 }
 
 # The original's landing squish, in 4096ths, one value a PAL frame from the
-# contact frame: it rises by 187 for 4 frames, then falls by 90, 80 and so on
-# down to 20 a frame, until it is 0.
+# contact frame: it rises by squish_gain for 4 frames, then falls by 90, 80 and
+# so on down to 20 a frame, until it is 0.
 squish_frames : List(F32)
 squish_frames = squish_rise(4, 0).concat(squish_fall(squish_peak, 100))
+
+squish_gain : I32
+squish_gain = 187
 
 squish_rise : I32, I32 -> List(F32)
 squish_rise = |frames, amount|
 	if frames == 0 {
 		[]
 	} else {
-		[(amount + 187).to_f32()].concat(squish_rise(frames - 1, amount + 187))
+		[(amount + squish_gain).to_f32()].concat(squish_rise(frames - 1, amount + squish_gain))
 	}
 
 squish_peak : I32
-squish_peak = 4 * 187
+squish_peak = 4 * squish_gain
 
 squish_fall : I32, I32 -> List(F32)
 squish_fall = |amount, damping| {
@@ -571,17 +575,17 @@ squish_fall = |amount, damping| {
 }
 
 squish_seconds : F32
-squish_seconds = (squish_frames.len() - 1).to_f32() * 0.02
+squish_seconds = (squish_frames.len() - 1).to_f32() * Clock.pal_frame
 
 # Linear between frames: each frame's amount weighs 1 at its frame and 0 one frame away.
 landing_squish : F32 -> F32
 landing_squish = |seconds| {
-	frame = seconds / 0.02
-	squish_frames.map_with_index(|amount, i| amount * hat(frame - i.to_f32())).fold(0.0, |sum, part| sum + part) / 4096.0
+	frame = seconds / Clock.pal_frame
+	squish_frames.map_with_index(|amount, i| amount * tent_weight(frame - i.to_f32())).fold(0.0, |sum, part| sum + part) / 4096.0
 }
 
-hat : F32 -> F32
-hat = |x| if x.abs() < 1.0 {
+tent_weight : F32 -> F32
+tent_weight = |x| if x.abs() < 1.0 {
 	1.0 - x.abs()
 } else {
 	0.0
@@ -677,7 +681,7 @@ advance_motion = |ball, dt, up| match ball.motion {
 		spin = if bouncing.to == bouncing.from {
 			0.0
 		} else {
-			top_spin * (min(next, at) - min(bouncing.seconds, at))
+			top_spin * (next.min(at) - bouncing.seconds.min(at))
 		}
 		rot = spin_about(bouncing.from, spin, ball.rot)
 		match bouncing.drop {
@@ -685,13 +689,6 @@ advance_motion = |ball, dt, up| match ball.motion {
 			_ => { ..ball, rot, motion: Bouncing({ ..bouncing, seconds: next }) }
 		}
 	}
-}
-
-min : F32, F32 -> F32
-min = |a, b| if a < b {
-	a
-} else {
-	b
 }
 
 spin_about : World.Pose, F32, Quat.Quat -> Quat.Quat
@@ -750,7 +747,7 @@ seconds_left = |ball| match ball.motion {
 	Bouncing(bouncing) => bounce_seconds(bouncing) - bouncing.seconds
 }
 
-# PAL frame counts from the original, at 0.02 s a frame. See SPEC.md.
+# PAL frame counts from the original. See SPEC.md.
 # An edge roll is half a cell at top speed, the 4-frame wrap, then half a cell.
 roll_seconds : Ball.RollKind -> F32
 roll_seconds = |kind| match kind {
@@ -781,7 +778,7 @@ full_clock = 100.0
 
 # Turns a second, for clock seconds left. Each frame the original adds 165 - 1.25 * clock, in 4096ths of a turn.
 bob_rate : F32 -> F32
-bob_rate = |clock| (165.0 - 1.25 * clock) / 4096.0 / 0.02
+bob_rate = |clock| (165.0 - 1.25 * clock) / 4096.0 / Clock.pal_frame
 
 # Radians a second at the top roll speed.
 top_spin : F32
@@ -789,17 +786,17 @@ top_spin = 1.0 / roll_seconds(Floor) / Ball.radius
 
 # A fall adds 6 to rotX a frame with Up held, else takes 1 away. The top rotX is 40.
 spin_gain : F32
-spin_gain = top_spin * 6.0 / 40.0 / 0.02
+spin_gain = top_spin * 6.0 / 40.0 / Clock.pal_frame
 
 spin_loss : F32
-spin_loss = top_spin / 40.0 / 0.02
+spin_loss = top_spin / 40.0 / Clock.pal_frame
 
 # The original adds 6 units a frame to the fall speed, up to 80 units a frame.
 gravity : F32
-gravity = 6.0 / 512.0 / (0.02 * 0.02)
+gravity = 6.0 / 512.0 / (Clock.pal_frame * Clock.pal_frame)
 
 top_fall_speed : F32
-top_fall_speed = 80.0 / 512.0 / 0.02
+top_fall_speed = 80.0 / 512.0 / Clock.pal_frame
 
 # The drop starts at the speed the jump arc ends with.
 drop_start_speed : F32
@@ -833,17 +830,17 @@ drop_time = |speed, cells| {
 	}
 }
 
-# A wall hit while rising drops at 10 units a frame, then gains gravity (`player_movement.c:438, 703-705`).
+# A wall hit while rising drops at 10 units a frame, then gains gravity. See Bounce in SPEC.md.
 wall_drop_speed : F32
-wall_drop_speed = 10.0 / 512.0 / 0.02
+wall_drop_speed = 10.0 / 512.0 / Clock.pal_frame
 
-# The back speed after a wall hit drops by 7 units a frame (`:431-436`).
+# The back speed after a wall hit drops by 7 units a frame.
 back_slowing : F32
-back_slowing = 7.0 / 512.0 / (0.02 * 0.02)
+back_slowing = 7.0 / 512.0 / (Clock.pal_frame * Clock.pal_frame)
 
-# A hit first moves the ball back by 2 frames of its speed (`:699-701, 742-744`).
+# A hit first moves the ball back by 2 frames of its speed.
 snap_seconds : F32
-snap_seconds = 2.0 * 0.02
+snap_seconds = 2.0 * Clock.pal_frame
 
 # Kula's arc peaks below the height at which the ball would touch a ceiling.
 # It hits at the same part of its peak as the Roll Away jump: at 312 of 458 units.

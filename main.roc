@@ -118,7 +118,7 @@ pickup_sounds = |before, after| before.pickups
 # but the level end, where the ball hides.
 bounce : Model, Model -> List(Command)
 bounce = |before, after| {
-	shown = Rules.ending(before.phase) == Err(NotEnded) and Rules.ending(after.phase) == Err(NotEnded)
+	shown = !Rules.ended(before.phase) and !Rules.ended(after.phase)
 	hit = shown and before.level_number == after.level_number and Ball.hit(before.ball, after.ball)
 	landed = before.phase == Playing and Ball.landed(before.ball, after.ball)
 	[hit, landed].keep_if(|plays| plays).map(|_| Sound.play(after.sounds.bounce))
@@ -305,7 +305,7 @@ lights_in = |scene| scene.nodes.join_map(
 
 expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }), Load({ pack: "hiro", assets: ["hiro_face", "sky/hiro"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, key: 0, sky: 0 }
-expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
+expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { ..Sounds.none, bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
 expect started.meshes == { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
@@ -387,9 +387,8 @@ expect {
 
 # A key moves between steps.
 expect {
-	keys_at = key_draws
 	later = step(column, idle, QueryResults.empty, 0.1).model
-	keys_at(later).map(|d| d.id) == keys_at(column).map(|d| d.id) and keys_at(later).map(|d| d.pos) != keys_at(column).map(|d| d.pos) and keys_at(later).map(|d| d.rot) != keys_at(column).map(|d| d.rot)
+	key_draws(later).map(|d| d.id) == key_draws(column).map(|d| d.id) and key_draws(later).map(|d| d.pos) != key_draws(column).map(|d| d.pos) and key_draws(later).map(|d| d.rot) != key_draws(column).map(|d| d.rot)
 }
 
 expect {
@@ -524,7 +523,7 @@ expect {
 	on_layer1 = at_pose(column, { ..column.level.start, cell: { x: 0, y: 2, z: 6 } })
 	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
 	jumped = step(rolling, space, QueryResults.empty, 0.01).model
-	landed = List.repeat(0.01, 100).fold(jumped, |m, dt| step(m, idle, QueryResults.empty, dt).model)
+	landed = run(jumped, List.repeat(idle, 100)).model
 	landed.ball.motion == Still and landed.keys_left == 2 and match jumped.ball.motion {
 		Falling({ from, .. }) => from.cell == { x: 0, y: 2, z: 6 }
 		_ => False
@@ -574,20 +573,23 @@ blocked = |layers| {
 	{ ..started, level, ball: Ball.start(level.start), pickups: [], keys_left: 0 }
 }
 
+# One step of 0.01 s for each input. commands holds each step's commands.
+run : Model, List(Vocabulary.Input) -> { model : Model, commands : List(List(Command)) }
+run = |model, inputs| inputs.fold(
+	{ model, commands: [] },
+	|so_far, input| {
+		next = step(so_far.model, input, QueryResults.empty, 0.01)
+		{ model: next.model, commands: so_far.commands.append(next.commands) }
+	},
+)
+
+# A step with first, then 60 idle steps.
+then_idle : Vocabulary.Input -> List(Vocabulary.Input)
+then_idle = |first| [first].concat(List.repeat(idle, 60))
+
 # Steps of 0.01 s from the jump press on. Each entry is the bounces the step plays.
 bounces_after : Model, Vocabulary.Input -> List(U64)
-bounces_after = |model, press| {
-	first = step(model, press, QueryResults.empty, 0.01)
-	List.repeat(0.01, 60)
-		.fold(
-			{ model: first.model, counts: [first.commands.keep_if(|c| c == Sound.play(bounce_id)).len()] },
-			|so_far, dt| {
-				next = step(so_far.model, idle, QueryResults.empty, dt)
-				{ model: next.model, counts: so_far.counts.append(next.commands.keep_if(|c| c == Sound.play(bounce_id)).len()) }
-			},
-		)
-		.counts
-}
+bounces_after = |model, press| run(model, then_idle(press)).commands.map(|commands| commands.keep_if(|c| c == Sound.play(bounce_id)).len())
 
 # Steps that played a bounce, counted from 1.
 bounce_steps : List(U64) -> List(U64)
@@ -836,15 +838,9 @@ expect {
 
 # A roll onto the coin collects it, plays the chime once and adds 250 to the level score.
 expect {
-	rolling = step(coin_run, up_held, QueryResults.empty, 0.01)
-	run = List.repeat(0.01, 60).fold(
-		{ model: rolling.model, chimes: rolling.commands.keep_if(|c| c == Sound.play(chime_id)).len() },
-		|so_far, dt| {
-			next = step(so_far.model, idle, QueryResults.empty, dt)
-			{ model: next.model, chimes: so_far.chimes + next.commands.keep_if(|c| c == Sound.play(chime_id)).len() }
-		},
-	)
-	run.chimes == 1 and run.model.pickups == [] and run.model.score.level == 250 and run.model.ball.pose.cell == { x: 0, y: 1, z: 1 }
+	rolled = run(coin_run, then_idle(up_held))
+	chimes = rolled.commands.join_map(|commands| commands).keep_if(|c| c == Sound.play(chime_id))
+	chimes.len() == 1 and rolled.model.pickups == [] and rolled.model.score.level == 250 and rolled.model.ball.pose.cell == { x: 0, y: 1, z: 1 }
 }
 
 expect launch({ seed: 0, args: [], assets: [] }).step_hz == 120
@@ -899,15 +895,8 @@ expect {
 
 # A roll onto the apple collects it, plays the jingle once, adds 2500 to the level score and lights a fruit flash.
 expect {
-	rolling = step(fruit_run(Fruit.none), up_held, QueryResults.empty, 0.01)
-	run = List.repeat(0.01, 60).fold(
-		{ model: rolling.model, sounds: rolling.commands },
-		|so_far, dt| {
-			next = step(so_far.model, idle, QueryResults.empty, dt)
-			{ model: next.model, sounds: so_far.sounds.concat(next.commands) }
-		},
-	)
-	run.sounds == [Sound.play(jingle_id)] and run.model.pickups == [] and run.model.score.level == 2500 and run.model.fruits.now == [Apple] and run.model.flashes.all(|flash| flash.kind == Fruit(Apple))
+	rolled = run(fruit_run(Fruit.none), then_idle(up_held))
+	rolled.commands.join_map(|commands| commands) == [Sound.play(jingle_id)] and rolled.model.pickups == [] and rolled.model.score.level == 2500 and rolled.model.fruits.now == [Apple] and rolled.model.flashes.all(|flash| flash.kind == Fruit(Apple))
 }
 
 # Two keys in a row, and no exit.
@@ -919,14 +908,8 @@ key_run = {
 
 # Rolling over both keys plays the key sound for the first, then only the last-key sound for the last.
 expect {
-	run = List.repeat(0.01, 60).fold(
-		{ model: key_run, sounds: [] },
-		|so_far, dt| {
-			next = step(so_far.model, up_held, QueryResults.empty, dt)
-			{ model: next.model, sounds: so_far.sounds.concat(next.commands) }
-		},
-	)
-	run.sounds == [Sound.play(key_sound_id), Sound.play(last_key_id)] and run.model.keys_left == 0
+	rolled = run(key_run, List.repeat(up_held, 60))
+	rolled.commands.join_map(|commands| commands) == [Sound.play(key_sound_id), Sound.play(last_key_id)] and rolled.model.keys_left == 0
 }
 
 # Two keys taken in one step play the key sound, then the last-key sound.

@@ -1,3 +1,5 @@
+import Clock
+
 # The level end sequence, as the original shows it after an exit. The banner
 # fades in while the level score counts up. A press finishes both, and the
 # next press goes on.
@@ -35,7 +37,7 @@ Ending := [].{
 	# The part of the banked level score shown so far. It rises by 100 a PAL frame.
 	counted : Ending.Ending -> U64
 	counted = |ending| {
-		frames = (ending.seconds / pal_frame).to_u64_try() ?? 0
+		frames = (ending.seconds / Clock.pal_frame).to_u64_try() ?? 0
 		shown = frames * count_rate
 		if ending.skipped or shown >= ending.banked {
 			ending.banked
@@ -45,19 +47,15 @@ Ending := [].{
 	}
 }
 
-pal_frame : F32
-pal_frame = 0.02
-
 # The original adds 3 a frame to the banner's fade, up to 256.
 banner_seconds : F32
-banner_seconds = 256.0 / 3.0 * pal_frame
+banner_seconds = 256.0 / 3.0 * Clock.pal_frame
 
 count_rate : U64
 count_rate = 100
 
 expect Ending.banner(Ending.start(0)) == 0.0 and Ending.counted(Ending.start(4000)) == 0
 
-# The banner is half in after 0.85 s. 4000 points take 40 frames, 0.8 s.
 expect {
 	half = Ending.advance(Ending.start(4000), 0.5 * banner_seconds)
 	counting = Ending.advance(Ending.start(4000), 0.5)

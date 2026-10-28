@@ -3,6 +3,7 @@ import pf.Vocabulary exposing [Rgb]
 import pf.Light
 import Grid
 import Pickup
+import Clock
 
 # The light that marks a pickup, as the original's light effect does.
 Flash := [].{
@@ -21,7 +22,7 @@ Flash := [].{
 
 	colour : Pickup.Kind, F32 -> Rgb
 	colour = |kind, age| {
-		sampled = sample(Pickup.glow(kind), age / pal_frame)
+		sampled = sample(Pickup.glow(kind), age / Clock.pal_frame)
 		{ r: sampled.r * strength, g: sampled.g * strength, b: sampled.b * strength }
 	}
 
@@ -45,7 +46,7 @@ Flash := [].{
 
 	lifetime : Pickup.Kind -> F32
 	lifetime = |kind| match Pickup.glow(kind).last() {
-		Ok(end) => end.frame * pal_frame
+		Ok(end) => end.frame * Clock.pal_frame
 		Err(_) => 0.0
 	}
 }
@@ -88,9 +89,6 @@ strength = 2.0 / 128.0 * pi / centre_irradiance
 
 pi : F32
 pi = 3.14159265
-
-pal_frame : F32
-pal_frame = 0.02
 
 host_lights : U64
 host_lights = 8

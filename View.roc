@@ -6,6 +6,7 @@ import pf.Draw
 import World
 import Grid
 import Ball
+import Clock
 
 View := [].{
 	# The kula pack's meshes. Each Theme names its own assets.
@@ -58,18 +59,18 @@ View := [].{
 	# three axes at once and swings in and out. seconds counts from the level end.
 	orbit : Set(World.Cell), F32 -> Camera
 	orbit = |blocks, seconds| {
-		turned = |turns_a_second| turns_a_second * seconds * 2.0 * pi
+		angle = |turns_a_second| turns_a_second * seconds * 2.0 * pi
 		axis = |x, y, z| { x, y, z }
 		# The original's view matrix is Rx Ry Rz. Its transpose turns the view axes into the world.
 		to_world = Quat.mul(
-			Quat.from_axis_angle(axis(0.0, 0.0, 1.0), -turned(orbit_z)),
-			Quat.mul(Quat.from_axis_angle(axis(0.0, 1.0, 0.0), -turned(orbit_y)), Quat.from_axis_angle(axis(1.0, 0.0, 0.0), -turned(orbit_x))),
+			Quat.from_axis_angle(axis(0.0, 0.0, 1.0), -angle(orbit_z)),
+			Quat.mul(Quat.from_axis_angle(axis(0.0, 1.0, 0.0), -angle(orbit_y)), Quat.from_axis_angle(axis(1.0, 0.0, 0.0), -angle(orbit_x))),
 		)
 		forward = from_original(Quat.rotate(axis(0.0, 0.0, 1.0), to_world))
 		# The original's view y points down the screen.
 		up = Vec3.neg(from_original(Quat.rotate(axis(0.0, 1.0, 0.0), to_world)))
 		reach = level_reach(blocks)
-		distance = reach.radius + orbit_distance + orbit_swing * turned(swing_rate).sin()
+		distance = reach.radius + orbit_distance + orbit_swing * angle(swing_rate).sin()
 		eye = Vec3.sub(reach.centre, Vec3.scale(forward, distance))
 		{ eye, target: Vec3.add(eye, forward), up, fov_y: camera_fov_y }
 	}
@@ -122,27 +123,24 @@ camera_drop = 250.0 / 512.0
 # The original turns its level end view by -10, 4 and 13 of 4096 a PAL frame
 # about x, y and z. These are turns a second.
 orbit_x : F32
-orbit_x = -10.0 / 4096.0 / pal_frame
+orbit_x = -10.0 / 4096.0 / Clock.pal_frame
 
 orbit_y : F32
-orbit_y = 4.0 / 4096.0 / pal_frame
+orbit_y = 4.0 / 4096.0 / Clock.pal_frame
 
 orbit_z : F32
-orbit_z = 13.0 / 4096.0 / pal_frame
+orbit_z = 13.0 / 4096.0 / Clock.pal_frame
 
 # The original's zoom phase gains 15 of 4096 a PAL frame. The view sits
 # 1200 + 1400 units past the farthest block centre, plus 1000 sin(phase).
 swing_rate : F32
-swing_rate = 15.0 / 4096.0 / pal_frame
+swing_rate = 15.0 / 4096.0 / Clock.pal_frame
 
 orbit_distance : F32
 orbit_distance = 2600.0 / 512.0
 
 orbit_swing : F32
 orbit_swing = 1000.0 / 512.0
-
-pal_frame : F32
-pal_frame = 0.02
 
 # Kula (x, y, z) is the original's (x, -z, y), so the original's up, -z, is Kula's +y.
 from_original : Vec3.Vec3 -> Vec3.Vec3
@@ -152,25 +150,11 @@ from_original = |v| { x: v.x, y: -v.z, z: v.y }
 level_reach : Set(World.Cell) -> { centre : Vec3.Vec3, radius : F32 }
 level_reach = |blocks| {
 	cells = blocks.to_list().map(Grid.to_vec3)
-	low = cells.fold(cells.first() ?? Vec3.zero, |a, c| { x: min(a.x, c.x), y: min(a.y, c.y), z: min(a.z, c.z) })
-	high = cells.fold(cells.first() ?? Vec3.zero, |a, c| { x: max(a.x, c.x), y: max(a.y, c.y), z: max(a.z, c.z) })
+	low = cells.fold(cells.first() ?? Vec3.zero, |a, c| { x: a.x.min(c.x), y: a.y.min(c.y), z: a.z.min(c.z) })
+	high = cells.fold(cells.first() ?? Vec3.zero, |a, c| { x: a.x.max(c.x), y: a.y.max(c.y), z: a.z.max(c.z) })
 	centre = Vec3.scale(Vec3.add(low, high), 0.5)
-	radius = cells.fold(0.0, |far, c| max(far, Vec3.length(Vec3.sub(c, centre))))
+	radius = cells.fold(0.0, |far, c| far.max(Vec3.length(Vec3.sub(c, centre))))
 	{ centre, radius }
-}
-
-min : F32, F32 -> F32
-min = |a, b| if a < b {
-	a
-} else {
-	b
-}
-
-max : F32, F32 -> F32
-max = |a, b| if a > b {
-	a
-} else {
-	b
 }
 
 # 73.7 degrees, from the original's 90 degree horizontal view on 4:3.
@@ -414,7 +398,6 @@ expect {
 	near(draw.scale, { x: d * (1.0 + s), y: d * (1.0 - 2.0 * s), z: d * (1.0 + s) }) and (draw.pos.y - draw.scale.y / 2.0 - 0.5).abs() < 0.0001
 }
 
-# A row of blocks from x 0 to x 4 has its centre at x 2 and reaches 2 cells.
 row_of_blocks : Set(World.Cell)
 row_of_blocks = Set.from_list([cell(0, 0, 0), cell(1, 0, 0), cell(2, 0, 0), cell(3, 0, 0), cell(4, 0, 0)])
 

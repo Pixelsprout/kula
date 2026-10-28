@@ -4,6 +4,10 @@ Clock := [].{
 	step_hz : U32
 	step_hz = 120
 
+	# One frame of the original, which runs at 50 frames a second on PAL.
+	pal_frame : F32
+	pal_frame = 0.02
+
 	# The original's 4950 frames, for a level with no settings record.
 	default_seconds : U64
 	default_seconds = 99
