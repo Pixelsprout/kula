@@ -1,5 +1,7 @@
 # Kula
 
+![The ball rolls over an edge on Hiro level 3, gravity turns, and the ball collects a key](docs/kula-level3.gif)
+
 A clone of Kula World (PS1, 1998) on the rocco engine. A ball rolls over a
 grid of blocks. Gravity turns when the ball rolls over an edge. Collect
 every key, then roll into the exit. The three levels are Hiro levels 1 to 3
