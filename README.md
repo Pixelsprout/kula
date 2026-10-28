@@ -227,7 +227,7 @@ Kula copies the original's level end. See `SPEC.md`, Level end.
 6. When both finish, `Press Space` shows. Press Space or the pad's South
    to go on. A press before they finish only finishes them.
 7. The next level starts. After level 3, the phase changes to `Won`.
-8. In `Won`, `Press Enter to play again` shows below the middle. Enter or
+8. In `Won`, `Press Enter to play again` shows above the middle. Enter or
    the pad's South starts a fresh game on level 1. The total and level
    score go to 0, the fruit set empties, and the clock and the keys reset.
    This is an addition: the original goes on to the next level of the world.

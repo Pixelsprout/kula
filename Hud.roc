@@ -17,11 +17,12 @@ Hud := [].{
 	}
 }
 
-# Kula's addition: Won asks for the press that starts a fresh game.
+# Kula's addition: Won asks for the press that starts a fresh game. The
+# prompt sits above the middle, because the play camera puts the ball below it.
 play_again : Rules.Model -> List(Element)
 play_again = |model|
 	if model.phase == Won {
-		[Box({ ..Ui.panel(CenterCenter, { x: 0.0, y: summary_drop }), pad: Ui.pad_all(16.0) }, [Text(Ui.label("Press Enter to play again"))])]
+		[Box({ ..Ui.panel(CenterCenter, { x: 0.0, y: -summary_drop }), pad: Ui.pad_all(16.0) }, [Text(Ui.label("Press Enter to play again"))])]
 	} else {
 		[]
 	}
@@ -182,12 +183,12 @@ expect {
 expect end_texts(ended(2.0)) == ["WELL DONE", "Level 3000", "Score 5000", "Press Space"]
 expect end_texts({ ..ended(2.0), phase: Cleared({ ..Ending.start(3000), seconds: 2.0 }) }) == ["WELL DONE", "Level 3000", "Score 5000", "Press Space"]
 
-# Won keeps the HUD and adds the play again prompt below the middle of the screen.
+# Won keeps the HUD and adds the play again prompt above the middle of the screen.
 expect {
 	won = { ..one_key, phase: Won }
 	match Hud.ui(won) {
 		[.. as hud, Box(prompt, [Text(text)])] =>
-			hud == Hud.ui({ ..won, phase: Playing }) and prompt.floating == Float({ attach: CenterCenter, offset: { x: 0.0, y: summary_drop } }) and text.str == "Press Enter to play again"
+			hud == Hud.ui({ ..won, phase: Playing }) and prompt.floating == Float({ attach: CenterCenter, offset: { x: 0.0, y: -summary_drop } }) and text.str == "Press Enter to play again"
 		_ => Bool.False
 	}
 }
