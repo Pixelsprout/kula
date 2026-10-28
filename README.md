@@ -304,7 +304,9 @@ levels from other worlds.
 
 The `hiro` Theme copies the look of the original's Hiro world. Its sky has
 a white zenith, blue sky with soft clouds, pyramids on the horizon and
-orange sand below. Its face is sandstone with a carved border. The sun
+orange sand below. The pyramids are an addition: the original paints them
+flat into its sky, and Kula renders them as 3D pyramids that the Theme sun
+lights. Its face is sandstone with a carved border. The sun
 comes from +z, so faces that look along +z are bright and warm, and faces
 that look along -z are dark. The colours are numbers from the original's
 `HIRO.TGI`; Kula's scripts make every pixel. See SPEC.md, Look.
@@ -443,13 +445,16 @@ them.
 | `assets/meshes/apple.glb` | A red apple 0.39 wide with a stem and a leaf |
 | `assets/meshes/watermelon.glb` | A striped watermelon 0.48 long, lying along ±z |
 | `assets/meshes/pumpkin.glb` | A ribbed orange pumpkin 0.44 wide with a stem |
-| `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky |
+| `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky, 512 texels square for `hiro` and 256 for the others |
 
 `assets/source/make_meshes.py` builds the meshes and their textures.
 `assets/source/make_skies.py` makes the skies. It paints the `hiro` sky
-texel by texel and renders the others with Blender's sky texture. Each
-Theme in a script uses the same name and sun direction as in `Theme.roc`. Run both with
-Blender from this directory:
+texel by texel and renders the others with Blender's sky texture. On the
+`hiro` sky it lays pyramids that Cycles renders: a Giza-like group of three
+large pyramids and four small ones in front of the start view, and a lone one
+behind it. The Theme sun lights them, haze softens the far ones, and each base
+fades into the sand. Each Theme in a script uses the same name and sun
+direction as in `Theme.roc`. Run both with Blender from this directory:
 
 ```sh
 /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_meshes.py
@@ -457,9 +462,11 @@ Blender from this directory:
 ```
 
 Names after `--` build only those meshes or skies, for example `-- coin`
-or `-- hiro`. A second run of `make_skies.py` writes the same files. Each
-fruit mesh has one material and one base colour texture, as the engine
-allows. Its origin is the fruit's centre. Commit the scripts and their
+or `-- hiro`. A second run of `make_skies.py` writes the same files on the
+same machine and Blender version: Cycles renders the pyramids on the CPU with
+a fixed seed and sample count. Another machine or Blender version can change
+some pyramid pixels. Each fruit mesh has one material and one base colour
+texture, as the engine allows. Its origin is the fruit's centre. Commit the scripts and their
 outputs. The build does not run Blender.
 
 ## Sound
