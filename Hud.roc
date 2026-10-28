@@ -13,9 +13,18 @@ Hud := [].{
 	ui : Rules.Model -> List(Element)
 	ui = |model| match Rules.ending(model.phase) {
 		Ok(ending) => end_panels(model, ending)
-		Err(NotEnded) => [bottom_row(model), fruit_corner(model)].concat(time(model))
+		Err(NotEnded) => [bottom_row(model), fruit_corner(model)].concat(time(model)).concat(play_again(model))
 	}
 }
+
+# Kula's addition: Won asks for the press that starts a fresh game.
+play_again : Rules.Model -> List(Element)
+play_again = |model|
+	if model.phase == Won {
+		[Box({ ..Ui.panel(CenterCenter, { x: 0.0, y: summary_drop }), pad: Ui.pad_all(16.0) }, [Text(Ui.label("Press Enter to play again"))])]
+	} else {
+		[]
+	}
 
 # As in the original, WELL DONE fades in at the top centre. The level score and
 # the total count up together below the middle of the screen.
@@ -172,3 +181,13 @@ expect {
 # Once the banner and the count finish, a prompt asks for the press. Cleared keeps the panel.
 expect end_texts(ended(2.0)) == ["WELL DONE", "Level 3000", "Score 5000", "Press Space"]
 expect end_texts({ ..ended(2.0), phase: Cleared({ ..Ending.start(3000), seconds: 2.0 }) }) == ["WELL DONE", "Level 3000", "Score 5000", "Press Space"]
+
+# Won keeps the HUD and adds the play again prompt below the middle of the screen.
+expect {
+	won = { ..one_key, phase: Won }
+	match Hud.ui(won) {
+		[.. as hud, Box(prompt, [Text(text)])] =>
+			hud == Hud.ui({ ..won, phase: Playing }) and prompt.floating == Float({ attach: CenterCenter, offset: { x: 0.0, y: summary_drop } }) and text.str == "Press Enter to play again"
+		_ => Bool.False
+	}
+}

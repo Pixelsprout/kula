@@ -33,6 +33,15 @@ Rules := [].{
 	next_level : Model -> Model
 	next_level = |model| { ..start_numbered(model.meshes, model.level_number + 1, model.fruits), sounds: model.sounds, score: model.score, phase: Starting(start_pause) }
 
+	# Kula's addition: in Won, a press starts a fresh game on level 1. The original goes on to the next level.
+	play_again : Bool -> (Model -> Model)
+	play_again = |pressed| |model|
+		if pressed and model.phase == Won {
+			{ ..start_numbered(model.meshes, 1, Fruit.none), sounds: model.sounds, phase: Starting(start_pause) }
+		} else {
+			model
+		}
+
 	count_down : F32 -> (Model -> Model)
 	count_down = |dt| |model| match model.phase {
 		Starting(seconds) => if seconds - dt > 0.0 {
@@ -316,6 +325,24 @@ expect {
 expect {
 	next = Rules.next_level({ ..Rules.start(meshes, 1), phase: Cleared(Ending.start(0)) })
 	next.level_number == 2 and next.phase == Starting(Rules.start_pause) and next.ball == Ball.start(next.level.start) and next.keys_left == 1
+}
+
+# A fresh game from Won resets the scores, the fruit set, the keys and the clock.
+expect {
+	won = { ..at(Rules.start(meshes, 3), last_exit_cell), phase: Won, keys_left: 0, pickups: [], score: { level: 0, total: 6000 }, fruits: { now: [Apple, Watermelon, Pumpkin], saved: [Apple, Watermelon, Pumpkin] }, clock: 40, sounds: { ..Sounds.none, bounce: 3 } }
+	again = Rules.play_again(True)(won)
+	again == { ..Rules.start(meshes, 1), sounds: won.sounds, phase: Starting(Rules.start_pause) }
+		and again.score == Score.zero
+			and again.fruits == Fruit.none
+				and again.pickups.map(|pickup| pickup.kind) == [Coin, Coin, Fruit(Apple), Key]
+					and again.keys_left == 1
+						and again.clock == Clock.start(Clock.default_seconds)
+}
+
+# Only a press in Won starts a fresh game.
+expect {
+	won = { ..Rules.start(meshes, 3), phase: Won }
+	Rules.play_again(False)(won) == won and [Playing, Exiting(0.1), Ending(Ending.start(0)), Cleared(Ending.start(0)), Starting(0.5)].all(|phase| Rules.play_again(True)({ ..won, phase }) == { ..won, phase })
 }
 
 expect Rules.count_down(0.4)({ ..Rules.start(meshes, 2), phase: Starting(1.0) }).phase == Starting(0.6)

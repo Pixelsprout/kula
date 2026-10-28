@@ -67,7 +67,8 @@ loaded = |model, pack, manifest| {
 step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
-	stages = [start_same_theme, Rules.count_down(dt), Rules.run_ending(controls.jump, dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
+	# play_again runs before run_ending, so the South press that reaches Won does not also start a fresh game.
+	stages = [start_same_theme, Rules.play_again(controls.again), Rules.count_down(dt), Rules.run_ending(controls.jump, dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
@@ -131,7 +132,7 @@ tick = |before, after| match Clock.tick(before.clock, after.clock) {
 }
 
 # forward is held; the others are pressed in this step.
-Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, quit : Bool }
+Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, again : Bool, quit : Bool }
 
 # The keys and every connected pad drive the one ball.
 read_controls : Vocabulary.Input -> Controls
@@ -140,6 +141,7 @@ read_controls = |input| {
 	jump: Key.pressed(input, Space) or Button.pressed_any(input, South),
 	left: Key.pressed(input, Left) or Button.pressed_any(input, DpadLeft),
 	right: Key.pressed(input, Right) or Button.pressed_any(input, DpadRight),
+	again: Key.pressed(input, Enter) or Button.pressed_any(input, South),
 	quit: Key.pressed(input, Escape) or Button.pressed_any(input, Start),
 }
 
@@ -817,8 +819,49 @@ expect {
 						and still_won.model.phase == Won
 							and draws_in(scene).keep_if(|d| d.mesh == won.model.meshes.ball).map(|d| d.tint) == [won_ball_tint]
 								and scene.camera == View.camera(won.model.ball)
-									and scene.ui == Hud.ui({ ..won.model, phase: Playing })
+									and scene.ui.drop_last(1) == Hud.ui({ ..won.model, phase: Playing })
 }
+
+enter : Vocabulary.Input
+enter = { ..idle, pressed: [Key.code(Enter)] }
+
+# A won game with a banked total, a full fruit set and a part-spent clock.
+won_game : Model
+won_game = { ..at_pose(on_level(3), { ..before_last_exit, cell: { x: 7, y: 1, z: 6 } }), phase: Won, keys_left: 0, pickups: [], score: { level: 0, total: 6000 }, fruits: { now: [Apple, Watermelon, Pumpkin], saved: [Apple, Watermelon, Pumpkin] }, clock: Clock.start(40) }
+
+# In Won, Enter starts a fresh game on level 1. The hiro Theme stays loaded,
+# so the step sends no Load and no Unload. After the pause, level 1 plays.
+expect {
+	again = step(won_game, enter, QueryResults.empty, 0.01)
+	fresh = on_level(1)
+	playing = step(again.model, idle, QueryResults.empty, Rules.start_pause).model
+	again.commands == []
+		and { ..again.model, ball: fresh.ball, pickups: fresh.pickups } == { ..fresh, phase: Starting(Rules.start_pause - 0.01) }
+			and again.model.ball.pose == fresh.ball.pose
+				and again.model.pickups.map(|pickup| pickup.kind) == fresh.pickups.map(|pickup| pickup.kind)
+					and again.model.score == { level: 0, total: 0 }
+						and again.model.fruits == Fruit.none
+							and draws_in(view(again.model)).any(|d| d.mesh == started.meshes.apple)
+								and playing.phase == Playing
+}
+
+# A pad's South starts a fresh game too. Space and the other inputs do nothing in Won.
+expect {
+	others = [space, up_held, forward_jump, { ..idle, pressed: [Key.code(Left)] }, { ..idle, pressed: [Key.code(Right)] }, with_pads([pad_pressing(DpadUp)])]
+	step(won_game, with_pads([pad_pressing(South)]), QueryResults.empty, 0.01).model.level_number == 1
+		and others.all(|input| { ..step(won_game, input, QueryResults.empty, 0.01).model, ball: won_game.ball } == won_game)
+}
+
+# The South press that reaches Won does not also start a fresh game, and Enter does not go on from a level end.
+expect {
+	finished = { ..won_game, phase: Ending({ ..Ending.start(0), seconds: 2.0 }) }
+	step(finished, with_pads([pad_pressing(South)]), QueryResults.empty, 0.01).model.phase == Won
+		and step(finished, enter, QueryResults.empty, 0.01).model.phase == Ending({ ..Ending.start(0), seconds: 2.01 })
+			and step(started, enter, QueryResults.empty, 0.01).model == step(started, idle, QueryResults.empty, 0.01).model
+}
+
+# A fresh game keeps the loaded Theme. A level 1 with another Theme would need a Load and a loaded first.
+expect Theme.of_level(1).pack == Theme.of_level(Level.count).pack
 
 # Three blocks in a row with a coin on the middle one. The ball starts on the last, facing it.
 coin_run : Model
