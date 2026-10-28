@@ -286,9 +286,11 @@ Kula copies the original's level clock. See `SPEC.md`, Level clock.
 - A panel at the top centre shows `Time n` for the whole level. This is a
   change from the original, which shows only an hourglass above 50 s. At the
   level start the panel reads the start time, `Time 99` on Hiro levels 1 to 3.
-- Above 50 s the text is white. At 50 s it goes black, then fades in. As in
-  the original, `n` is 1 more than the whole seconds left, so the panel
-  reads `Time 1` in the last second.
+- Above 50 s the text is white. From 50 s it dims to grey, darkest at 25 s,
+  then goes back to white by the last second. This is also a change from the
+  original, which turns the text black at 50 s and fades it in. As in the
+  original, `n` is 1 more than the whole seconds left, so the panel reads
+  `Time 1` in the last second.
 - In the last 20 s, a tick plays each time `n` drops, louder each time.
 
 ## Levels and Themes
