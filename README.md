@@ -156,12 +156,12 @@ from where the ball is. It aims two cells past the cell the ball is nearest
 to. No input acts during a forward jump.
 
 - If a block is in either of the two cells ahead, the jump bounces. The
-  jump bounces too if a block is above the ball when it rises high enough.
-  At that height the ball reaches over into the next cell, so a block above
-  that cell counts too. The ball hits the block and drops back onto the
-  cell nearest the hit: its own cell for a block above or one ahead, the
-  cell between for a block two ahead. With no block under that cell, it
-  falls on.
+  jump bounces too if the rising ball, high enough, is under a block. A
+  block above the next cell counts once the ball reaches over the cell
+  line, which a jump from a still ball does at once. The ball hits the
+  block and drops back onto the cell nearest the hit: its own cell for a
+  block above or one ahead, the cell between for a block two ahead. With no
+  block under that cell, it falls on.
 - If a block is under the landing cell, the ball lands there.
 - If no block is under the landing cell, the ball falls.
 
