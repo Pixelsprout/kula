@@ -418,6 +418,7 @@ copies it with the phases `Exiting`, `Ending` and `Cleared` (`Rules.Phase`).
 | Press | X during the fade or the count finishes both. A new X press after that confirms (`level_end.c:192-203`), and the next frame ends the level (`main.c:650-664, 772-776`) | Code | Space or the pad's South. A press before the banner and the count finish only finishes them (`Ending.press`) |
 | Prompt | Sprite 6 draws once the count ends (`level_end.c:157`) | Code (draw), Inferred (that it is a prompt) | `Press Space` under the scores once the banner and the count finish |
 | After the press | The next level loads | Code | `Cleared`. The next level starts in the next step, or when its Theme loads. After the last level, `Won` |
+| After the last level | `DecideNextLevel` adds 1 to `curLevel`, so the game goes on to the next level of the world (`main.c:1026`). A new game sets the scores and the fruit set to 0 (`main.c:286-289`) | Code | An addition. Kula has three levels. In `Won`, Enter or the pad's South starts a fresh game on level 1 (`Rules.play_again`), with the scores, the fruit set, the keys and the clock as at a new game. The `hiro` Theme stays loaded, so Kula sends no Load and no Unload. `Press Enter to play again` shows below the middle |
 | Sound | No sound plays at the exit | Code | No sound |
 
 ## HUD
@@ -426,7 +427,7 @@ The original draws its HUD with sprites on a 320 × 256 screen. Kula draws
 Text panels (`Hud.ui`), because the engine has no UI images. The original
 hides the HUD once a level ends (`main.c:648-680`, Code). Kula hides it in
 `Ending` and `Cleared`. See Level end. In `Won` the HUD shows the banked
-total.
+total and a `Press Enter to play again` prompt.
 
 | Fact | Original | Label | Clone |
 |---|---|---|---|
@@ -451,7 +452,7 @@ total.
 - The hourglass in the HUD, the hourglass item, Timer pause faces and the
   time-out screen.
 - The save point menu, the death screens and the game's ending. Kula shows
-  `Won` after the level end of its last level.
+  `Won` after the level end of its last level, and Enter starts a fresh game.
 - Bonus levels, the fruit bowl and the HUD's BONUS letters.
 - The fruit pickup's particle that flies to the HUD, and the 4 s that a
   fruit takes off the time-trial play time (`level_update3.c:244-252`).

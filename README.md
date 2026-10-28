@@ -73,11 +73,12 @@ Roc installed. It checks the header, then runs `roc fmt --check`, `roc check`,
 | Space | Jump in place |
 | Up and Space | Jump forward |
 | Space during a roll | Jump forward |
+| Enter, in `Won` | Start a fresh game on level 1 |
 | Escape | Quit |
 | Pad DpadUp, or the left stick more than half way up, held | Roll forward, as Up |
 | Pad DpadLeft | Turn 90° left |
 | Pad DpadRight | Turn 90° right |
-| Pad South | Jump, as Space |
+| Pad South | Jump, as Space. In `Won`, start a fresh game, as Enter |
 | Pad Start | Quit |
 
 Left, Right and Space act on the press. Hold Up to keep rolling. Escape
@@ -107,7 +108,7 @@ current one ends.
 | Face | One side of a block that touches an empty cell. Only faces draw. |
 | Commit | A move sets the new pose when it starts. The ball then moves to that pose over the time of the move. |
 | Open end | A block with no block to its left or right, as the ball sees it. Only an open end lets the ball roll over the edge. |
-| Phase | `Playing`, `Exiting`, `Ending`, `Cleared`, `Starting` or `Won`. In `Exiting`, the ball is on the open exit and the level ends soon. `Ending` shows the level end until a press. `Cleared` waits for the next Theme to load. In `Starting`, the ball waits before the next level plays. |
+| Phase | `Playing`, `Exiting`, `Ending`, `Cleared`, `Starting` or `Won`. In `Exiting`, the ball is on the open exit and the level ends soon. `Ending` shows the level end until a press. `Cleared` waits for the next Theme to load. In `Starting`, the ball waits before the next level plays. `Won` follows the last level end. |
 | Theme | The look of one level: a pack of a textured face and a sky, a sun and its lights. |
 
 ## Moves
@@ -200,7 +201,8 @@ back and the exit closes. The fall also costs points. See Score.
 - After the level end of level 3, a press changes the phase to `Won`. The
   ball shows again on the exit, and the HUD comes back. The ball changes
   colour.
-- In `Won`, every input except Escape does nothing.
+- In `Won`, Enter or the pad's South starts a fresh game on level 1. Every
+  other input except Escape does nothing. See Level end.
 - A closed exit does nothing. The ball can roll over it.
 - A panel at the bottom left shows the keys collected out of the level's
   total, such as `Keys 1 / 2`. It hides with the rest of the HUD in `Ending`
@@ -225,6 +227,10 @@ Kula copies the original's level end. See `SPEC.md`, Level end.
 6. When both finish, `Press Space` shows. Press Space or the pad's South
    to go on. A press before they finish only finishes them.
 7. The next level starts. After level 3, the phase changes to `Won`.
+8. In `Won`, `Press Enter to play again` shows below the middle. Enter or
+   the pad's South starts a fresh game on level 1. The total and level
+   score go to 0, the fruit set empties, and the clock and the keys reset.
+   This is an addition: the original goes on to the next level of the world.
 
 ## Coins
 
@@ -322,7 +328,8 @@ sun light comes from.
 If the next level has the same Theme, Kula sends no Load and no Unload,
 because the host ignores a Load for a pack that is already loaded. The
 step after the press starts the next level with the Theme's ids, and the
-`Starting` pause follows. Levels 1 to 3 take this path.
+`Starting` pause follows. Levels 1 to 3 take this path. A fresh game from
+`Won` also keeps the `hiro` Theme, so it sends no Load and no Unload.
 
 A fall restarts the level the ball is on, not level 1.
 
