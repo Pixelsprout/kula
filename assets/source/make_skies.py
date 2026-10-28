@@ -161,11 +161,18 @@ def face_rotation(direction):
     return Matrix([[c[i] for c in columns] for i in range(3)]).to_quaternion()
 
 
+# Blender's first pixel row is the bottom one.
+def load_pixels(path, side):
+    image = bpy.data.images.load(path)
+    pixels = numpy.empty(side * side * 4, dtype=numpy.float32)
+    image.pixels.foreach_get(pixels)
+    bpy.data.images.remove(image)
+    return pixels.reshape(side, side, 4)
+
+
 # A new image carries no render stamp, so a rerun writes the same bytes.
 def mirror(path):
-    render = bpy.data.images.load(path)
-    pixels = numpy.array(render.pixels[:]).reshape(SIDE, SIDE, 4)
-    bpy.data.images.remove(render)
+    pixels = load_pixels(path, SIDE)
     image = bpy.data.images.new("face", SIDE, SIDE, alpha=False)
     image.pixels = pixels[:, ::-1].ravel()
     image.filepath_raw = path
@@ -174,33 +181,45 @@ def mirror(path):
     bpy.data.images.remove(image)
 
 
+def set_output(scene, side, file_format, color_mode, color_depth):
+    scene.render.resolution_x = side
+    scene.render.resolution_y = side
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = file_format
+    scene.render.image_settings.color_mode = color_mode
+    scene.render.image_settings.color_depth = color_depth
+
+
+# Renders the named faces through one 90 degree camera and yields each face
+# with the path of its render.
+def render_faces(scene, faces, folder, extension, clip_end=None):
+    cam_data = bpy.data.cameras.new("cube")
+    cam_data.angle = math.pi / 2
+    if clip_end is not None:
+        cam_data.clip_end = clip_end
+    cam = bpy.data.objects.new("cube", cam_data)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+    cam.rotation_mode = "QUATERNION"
+    for face in faces:
+        cam.rotation_quaternion = face_rotation(FACES[face])
+        path = os.path.join(folder, face + extension)
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        yield face, path
+
+
 def render_theme(theme):
     clear_scene()
     scene = bpy.context.scene
     scene.world = world(theme)
     scene.render.engine = "BLENDER_EEVEE"
-    scene.render.resolution_x = SIDE
-    scene.render.resolution_y = SIDE
-    scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.image_settings.color_mode = "RGB"
-    scene.render.image_settings.color_depth = "8"
+    set_output(scene, SIDE, "PNG", "RGB", "8")
     scene.view_settings.view_transform = "Standard"
-
-    cam_data = bpy.data.cameras.new("cube")
-    cam_data.angle = math.pi / 2
-    cam = bpy.data.objects.new("cube", cam_data)
-    scene.collection.objects.link(cam)
-    scene.camera = cam
-    cam.rotation_mode = "QUATERNION"
 
     out = os.path.join(SKY, theme["name"])
     os.makedirs(out, exist_ok=True)
-    for name, direction in FACES.items():
-        cam.rotation_quaternion = face_rotation(direction)
-        path = os.path.join(out, name + ".png")
-        scene.render.filepath = path
-        bpy.ops.render.render(write_still=True)
+    for _, path in render_faces(scene, FACES, out, ".png"):
         mirror(path)
 
 
@@ -220,9 +239,10 @@ def write_face(path, srgb, side):
 SUPERSAMPLE = 3
 
 
-def paint_theme(name, paint, side=SIDE, layers=None):
+def paint_theme(name, sky):
+    side = sky["side"]
     n = side * SUPERSAMPLE
-    over = layers(n) if layers else {}
+    overlays = sky["overlay"](n) if "overlay" in sky else {}
     clear_scene()
     out = os.path.join(SKY, name)
     os.makedirs(out, exist_ok=True)
@@ -232,24 +252,23 @@ def paint_theme(name, paint, side=SIDE, layers=None):
         x, y, z = direction(u, v)
         d = numpy.stack(numpy.broadcast_arrays(x, y, z), axis=-1).astype(numpy.float64)
         d /= numpy.linalg.norm(d, axis=-1, keepdims=True)
-        colour = paint(d)
-        if face in over:
-            layer = over[face]
-            alpha = layer[..., 3:]
-            laid = to_srgb(to_linear(colour) * (1.0 - alpha) + layer[..., :3])
+        colour = sky["paint"](d)
+        if face in overlays:
+            overlay = overlays[face]
+            alpha = overlay[..., 3:]
+            laid = 255.0 * to_srgb(to_linear(colour / 255.0) * (1.0 - alpha) + overlay[..., :3])
             colour = numpy.where(alpha > 0.0, laid, colour)
         colour = colour.reshape(side, SUPERSAMPLE, side, SUPERSAMPLE, 3).mean(axis=(1, 3))
         write_face(os.path.join(out, face + ".png"), numpy.round(numpy.clip(colour, 0.0, 255.0)), side)
 
 
-def to_linear(srgb):
-    c = srgb / 255.0
+def to_linear(c):
     return numpy.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
 def to_srgb(linear):
     c = numpy.clip(linear, 0.0, 1.0)
-    return 255.0 * numpy.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1.0 / 2.4) - 0.055)
+    return numpy.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1.0 / 2.4) - 0.055)
 
 
 def smoothstep(edge0, edge1, x):
@@ -291,10 +310,10 @@ def ramp(keys, x):
     return numpy.stack([numpy.interp(x, xs, [k[1][c] for k in keys]) for c in range(3)], axis=-1)
 
 
-# The Hiro sky: a white zenith, blue sky with soft clouds, pyramids on the
-# horizon and orange sand below. The sRGB colours by elevation in degrees are
-# the band averages of the original's Hiro skybox (HIRO.TGI). Every pixel is
-# painted here; no texture of the original is used.
+# The Hiro sky: a white zenith, blue sky with soft clouds and orange sand below.
+# hiro_pyramids renders the pyramids over it. The sRGB colours by elevation in
+# degrees are the band averages of the original's Hiro skybox (HIRO.TGI). No
+# texture of the original is used.
 HIRO_SKY = [
     (0.0, (150, 178, 186)),
     (3.75, (112, 159, 173)),
@@ -358,22 +377,18 @@ def paint_hiro(d):
     return sky + (sand - sky) * below
 
 
-# The Hiro pyramids are real geometry that Cycles renders over the painted sky,
-# lit by the hiro Theme sun. Units are metres. Each row is the azimuth in
-# degrees from -z towards +x, the distance to the centre, the base width, the
-# height and the share of the height at the top that keeps its smooth casing.
-# The first three are the large Giza-like group in front of the start view, and
-# the last is the lone pyramid behind it. Each base faces the axes, as the
-# blocks do, so its sides take the same light as the block faces.
+# Lengths are metres. The azimuth runs in degrees from -z towards +x. cap is the
+# share of the height at the top that keeps a smooth casing. Each base faces the
+# axes, as the blocks do, so its sides take the same light as the block faces.
 HIRO_PYRAMIDS = [
-    (-27.0, 470.0, 230.0, 146.0, 0.0),
-    (-7.0, 820.0, 215.0, 143.0, 0.18),
-    (-47.0, 640.0, 105.0, 66.0, 0.0),
-    (-55.0, 590.0, 34.0, 22.0, 0.0),
-    (-59.0, 600.0, 30.0, 19.0, 0.0),
-    (-62.0, 610.0, 28.0, 17.0, 0.0),
-    (6.0, 560.0, 40.0, 26.0, 0.0),
-    (148.0, 500.0, 125.0, 80.0, 0.0),
+    {"azimuth": -27.0, "distance": 470.0, "base": 230.0, "height": 146.0, "cap": 0.0},
+    {"azimuth": -7.0, "distance": 820.0, "base": 215.0, "height": 143.0, "cap": 0.18},
+    {"azimuth": -47.0, "distance": 640.0, "base": 105.0, "height": 66.0, "cap": 0.0},
+    {"azimuth": -55.0, "distance": 590.0, "base": 34.0, "height": 22.0, "cap": 0.0},
+    {"azimuth": -59.0, "distance": 600.0, "base": 30.0, "height": 19.0, "cap": 0.0},
+    {"azimuth": -62.0, "distance": 610.0, "base": 28.0, "height": 17.0, "cap": 0.0},
+    {"azimuth": 6.0, "distance": 560.0, "base": 40.0, "height": 26.0, "cap": 0.0},
+    {"azimuth": 148.0, "distance": 500.0, "base": 125.0, "height": 80.0, "cap": 0.0},
 ]
 # Each base centre sits this many degrees below the horizon, where the painted
 # sky has turned into sand.
@@ -383,7 +398,7 @@ HIRO_GROUND_MIST = 6.0
 # Over this distance half of a pyramid's colour turns to the haze colour.
 HIRO_HAZE_HALF = 900.0
 HIRO_HAZE = (184, 172, 156)
-# Theme.roc's hiro sun. Cycles divides diffuse light by pi, as the engine does.
+# Theme.roc's hiro sun.
 HIRO_SUN_LIGHT = (1.7 * 140.0 / 128.0, 1.7 * 128.0 / 128.0, 1.7 * 102.0 / 128.0)
 # The Theme's fill and ambient light the block faces that turn away from the sun.
 # Cycles traces the light off the sand instead, so the pyramids take no fill and
@@ -403,11 +418,6 @@ PYRAMID_ROUGHNESS = 0.9
 HIRO_SIDE = 512
 
 
-def linear_to_srgb(c):
-    c = max(0.0, min(1.0, c))
-    return c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
-
-
 # Each course is a row of stones with a dark joint below it. Each course's
 # joints sit half a stone along from the course below.
 def pyramid_image():
@@ -417,7 +427,7 @@ def pyramid_image():
     stone_width = size // PYRAMID_STONES
     shades = [[rng.uniform(0.92, 1.04) for _ in range(PYRAMID_STONES)] for _ in range(PYRAMID_COURSES)]
     image = bpy.data.images.new("pyramid", size, size, alpha=False)
-    pixels = []
+    linear = []
     for y in range(size):
         course = y // course_height
         offset = stone_width // 2 if course % 2 else 0
@@ -426,8 +436,10 @@ def pyramid_image():
             joint = y % course_height == 0 or (x + offset) % stone_width == 0
             shade = 0.86 if joint else shades[course][stone]
             noise = 1.0 + rng.uniform(-0.04, 0.04)
-            pixels.extend([linear_to_srgb(c * shade * noise) for c in PYRAMID_STONE] + [1.0])
-    image.pixels = pixels
+            linear.append([c * shade * noise for c in PYRAMID_STONE])
+    rgba = numpy.ones((size * size, 4))
+    rgba[:, :3] = to_srgb(numpy.array(linear))
+    image.pixels = rgba.ravel()
     image.pack()
     return image
 
@@ -474,14 +486,14 @@ def pyramid_material():
     cap = nodes.new("ShaderNodeAttribute")
     cap.attribute_type = "OBJECT"
     cap.attribute_name = "cap"
-    start = nodes.new("ShaderNodeMath")
-    start.operation = "SUBTRACT"
-    start.inputs[0].default_value = 1.0
-    links.new(cap.outputs["Fac"], start.inputs[1])
+    casing_start = nodes.new("ShaderNodeMath")
+    casing_start.operation = "SUBTRACT"
+    casing_start.inputs[0].default_value = 1.0
+    links.new(cap.outputs["Fac"], casing_start.inputs[1])
     casing = nodes.new("ShaderNodeMath")
     casing.operation = "GREATER_THAN"
     links.new(height.outputs["Z"], casing.inputs[0])
-    links.new(start.outputs["Value"], casing.inputs[1])
+    links.new(casing_start.outputs["Value"], casing.inputs[1])
     stone = nodes.new("ShaderNodeMix")
     stone.data_type = "RGBA"
     links.new(casing.outputs["Value"], stone.inputs["Factor"])
@@ -494,13 +506,13 @@ def pyramid_material():
     haze.operation = "MULTIPLY"
     haze.inputs[1].default_value = -math.log(2.0) / HIRO_HAZE_HALF
     links.new(camera.outputs["View Distance"], haze.inputs[0])
-    clear = nodes.new("ShaderNodeMath")
-    clear.operation = "EXPONENT"
-    links.new(haze.outputs["Value"], clear.inputs[0])
+    transmittance = nodes.new("ShaderNodeMath")
+    transmittance.operation = "EXPONENT"
+    links.new(haze.outputs["Value"], transmittance.inputs[0])
     air = nodes.new("ShaderNodeEmission")
-    air.inputs["Color"].default_value = (*to_linear(numpy.array(HIRO_HAZE, float)), 1.0)
+    air.inputs["Color"].default_value = (*to_linear(numpy.array(HIRO_HAZE) / 255.0), 1.0)
     hazed = nodes.new("ShaderNodeMixShader")
-    links.new(clear.outputs["Value"], hazed.inputs["Fac"])
+    links.new(transmittance.outputs["Value"], hazed.inputs["Fac"])
     links.new(air.outputs["Emission"], hazed.inputs[1])
     links.new(bsdf.outputs["BSDF"], hazed.inputs[2])
 
@@ -512,10 +524,10 @@ def pyramid_material():
     mist.inputs["From Min"].default_value = 0.0
     links.new(mist_top.outputs["Fac"], mist.inputs["From Max"])
     links.new(height.outputs["Z"], mist.inputs["Value"])
-    clear_air = nodes.new("ShaderNodeBsdfTransparent")
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
     faded = nodes.new("ShaderNodeMixShader")
     links.new(mist.outputs["Result"], faded.inputs["Fac"])
-    links.new(clear_air.outputs["BSDF"], faded.inputs[1])
+    links.new(transparent.outputs["BSDF"], faded.inputs[1])
     links.new(hazed.outputs["Shader"], faded.inputs[2])
     links.new(faded.outputs["Shader"], out.inputs["Surface"])
     return mat
@@ -524,6 +536,8 @@ def pyramid_material():
 def sun_lamp(name, direction, colour):
     strength = max(colour)
     light = bpy.data.lights.new(name, "SUN")
+    # Cycles divides diffuse light by pi, as the engine does, so this multiplies
+    # by pi as Theme.roc's times_pi does.
     light.energy = strength * math.pi
     light.color = tuple(c / strength for c in colour)
     light.angle = math.radians(0.53)
@@ -546,12 +560,7 @@ def hiro_pyramids(n):
     scene.cycles.use_adaptive_sampling = False
     scene.cycles.use_denoising = False
     scene.render.film_transparent = True
-    scene.render.resolution_x = n
-    scene.render.resolution_y = n
-    scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "OPEN_EXR"
-    scene.render.image_settings.color_mode = "RGBA"
-    scene.render.image_settings.color_depth = "32"
+    set_output(scene, n, "OPEN_EXR", "RGBA", "32")
 
     sky = bpy.data.worlds.new("hiro")
     sky.use_nodes = True
@@ -563,48 +572,34 @@ def hiro_pyramids(n):
     sand = bpy.data.materials.new("sand")
     sand.use_nodes = True
     sand.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (*HIRO_SAND_ALBEDO, 1.0)
-    lowest = max(distance for _, distance, _, _, _ in HIRO_PYRAMIDS) * math.tan(math.radians(HIRO_BASE_DIP))
+    lowest = max(p["distance"] for p in HIRO_PYRAMIDS) * math.tan(math.radians(HIRO_BASE_DIP))
     bpy.ops.mesh.primitive_plane_add(size=20000.0, location=(0.0, 0.0, -lowest))
     ground = bpy.context.object
     ground.data.materials.append(sand)
     ground.visible_camera = False
 
     mesh = pyramid_mesh(pyramid_material())
-    for i, (azimuth, distance, base, height, cap) in enumerate(HIRO_PYRAMIDS):
-        a = math.radians(azimuth)
+    for i, p in enumerate(HIRO_PYRAMIDS):
+        a = math.radians(p["azimuth"])
+        distance = p["distance"]
         pyramid = bpy.data.objects.new("pyramid%d" % i, mesh)
         dip = distance * math.tan(math.radians(HIRO_BASE_DIP))
         pyramid.location = to_blender((distance * math.sin(a), -dip, -distance * math.cos(a)))
-        pyramid.scale = (base, base, height)
-        pyramid["cap"] = cap
-        pyramid["mist"] = HIRO_GROUND_MIST / height
+        pyramid.scale = (p["base"], p["base"], p["height"])
+        pyramid["cap"] = p["cap"]
+        pyramid["mist"] = HIRO_GROUND_MIST / p["height"]
         scene.collection.objects.link(pyramid)
 
-    cam_data = bpy.data.cameras.new("cube")
-    cam_data.angle = math.pi / 2
-    cam_data.clip_end = 20000.0
-    cam = bpy.data.objects.new("cube", cam_data)
-    scene.collection.objects.link(cam)
-    scene.camera = cam
-    cam.rotation_mode = "QUATERNION"
-
-    layers = {}
+    overlays = {}
     with tempfile.TemporaryDirectory() as folder:
-        for face in ["px", "nx", "pz", "nz"]:
-            cam.rotation_quaternion = face_rotation(FACES[face])
-            scene.render.filepath = os.path.join(folder, face + ".exr")
-            bpy.ops.render.render(write_still=True)
-            render = bpy.data.images.load(scene.render.filepath)
-            pixels = numpy.empty(n * n * 4, dtype=numpy.float32)
-            render.pixels.foreach_get(pixels)
-            bpy.data.images.remove(render)
-            # Blender's first row is the bottom one, and a face mirrors the camera view.
-            layers[face] = pixels.reshape(n, n, 4)[::-1, ::-1]
-    return layers
+        for face, path in render_faces(scene, ["px", "nx", "pz", "nz"], folder, ".exr", clip_end=20000.0):
+            # A face mirrors the camera view.
+            overlays[face] = load_pixels(path, n)[::-1, ::-1]
+    return overlays
 
 
-# Each painted sky is its paint function, its face side and an optional layer to lay over it.
-PAINTED = {"hiro": (paint_hiro, HIRO_SIDE, hiro_pyramids)}
+# overlay renders the linear premultiplied colour that paint_theme lays over the paint.
+PAINTED = {"hiro": {"paint": paint_hiro, "side": HIRO_SIDE, "overlay": hiro_pyramids}}
 
 
 def chosen(argv):
@@ -618,6 +613,6 @@ def chosen(argv):
 
 for name in chosen(sys.argv):
     if name in PAINTED:
-        paint_theme(name, *PAINTED[name])
+        paint_theme(name, PAINTED[name])
     else:
         render_theme(next(theme for theme in THEMES if theme["name"] == name))
