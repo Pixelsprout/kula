@@ -13,7 +13,7 @@ Hud := [].{
 	ui : Rules.Model -> List(Element)
 	ui = |model| match Rules.ending(model.phase) {
 		Ok(ending) => end_panels(model, ending)
-		Err(NotEnded) => [bottom_row(model), fruit_corner(model)].concat(time(model)).concat(play_again(model))
+		Err(NotEnded) => [bottom_row(model), fruit_corner(model), time(model)].concat(play_again(model))
 	}
 }
 
@@ -56,10 +56,11 @@ summary_drop : F32
 summary_drop = 120.0
 
 # As in the original, the Time panel sits at the top centre.
-time : Rules.Model -> List(Element)
-time = |model| match Clock.brightness(model.clock) {
-	Ok(shade) => [Box(Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), [Text({ ..Ui.label("Time ${Clock.shown(model.clock).to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])]
-	Err(Hidden) => []
+time : Rules.Model -> Element
+time = |model| {
+	seconds = Clock.on_panel(model.clock, model.level.time)
+	shade = Clock.brightness(seconds)
+	Box(Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), [Text({ ..Ui.label("Time ${seconds.to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])
 }
 
 # The original's screen is 320 pixels wide. It draws the keys at x 16 and the
@@ -109,30 +110,45 @@ one_key = {
 # The HUD's first root is one row along the bottom: the keys panel, then the scores panel.
 expect
 	match Hud.ui(Rules.start(View.primitive_meshes, 1)) {
-		[Box(row, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _] =>
+		[Box(row, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _, _] =>
 			row.floating == Float({ attach: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and keys_text == Ui.label("Keys 0 / 1") and level.str == "Level 0" and total.str == "Score 0"
 		_ => Bool.False
 	}
 
 expect
 	match Hud.ui({ ..one_key, score: { ..one_key.score, total: 2500 } }) {
-		[Box(_, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _] => keys_text.str == "Keys 1 / 1" and level.str == "Level 1000" and total.str == "Score 2500"
+		[Box(_, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _, _] => keys_text.str == "Keys 1 / 1" and level.str == "Level 1000" and total.str == "Score 2500"
 		_ => Bool.False
 	}
 
-expect Hud.ui({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(50) }).len() == 2
+# The Time panel is the third root, at the top centre. It gives the text and its grey shade.
+time_panel : Rules.Model -> Try({ str : Str, shade : F32 }, [NoPanel])
+time_panel = |model| match Hud.ui(model) {
+	[_, _, Box(time_box, [Text(text)]), ..] =>
+		if time_box.floating == Float({ attach: CenterTop, offset: { x: 0.0, y: 16.0 } }) and text.color.r == text.color.g and text.color.g == text.color.b and text.color.a == 1.0 {
+			Ok({ str: text.str, shade: text.color.r })
+		} else {
+			Err(NoPanel)
+		}
+	_ => Err(NoPanel)
+}
 
-# At 45 s the Time panel is a third root at the top centre, a tenth of the way from black.
-expect
-	match Hud.ui({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(45) - 1 }) {
-		[_, _, Box(time_box, [Text(time_text)])] =>
-			time_box.floating == Float({ attach: CenterTop, offset: { x: 0.0, y: 16.0 } }) and time_text.str == "Time 45" and time_text.color == { r: 0.1, g: 0.1, b: 0.1, a: 1.0 }
-		_ => Bool.False
-	}
+# The panel shows from the level start in white, also in the Starting wait before a level.
+expect time_panel(Rules.start(View.primitive_meshes, 1)) == Ok({ str: "Time 99", shade: 1.0 })
+expect time_panel({ ..Rules.start(View.primitive_meshes, 2), phase: Starting(1.0) }) == Ok({ str: "Time 99", shade: 1.0 })
+
+# At 50 s the text goes black, then fades in: a tenth of the way at 45 s.
+expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(50) }) == Ok({ str: "Time 51", shade: 1.0 })
+expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(50) - 1 }) == Ok({ str: "Time 50", shade: 0.0 })
+expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(45) - 1 }) == Ok({ str: "Time 45", shade: 0.1 })
+
+# In the last 20 s the panel goes on fading in, to nearly white in the last second.
+expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(10) - 1 }) == Ok({ str: "Time 10", shade: 0.8 })
+expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: 1 }) == Ok({ str: "Time 1", shade: 0.98 })
 
 fruit_text : Rules.Model -> Str
 fruit_text = |model| match Hud.ui(model) {
-	[_, Box(corner, [Box(_, [Text(text)])])] =>
+	[_, Box(corner, [Box(_, [Text(text)])]), ..] =>
 		if corner.floating == Float({ attach: RightBottom, offset: { x: 0.0, y: 0.0 } }) {
 			text.str
 		} else {

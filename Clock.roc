@@ -19,15 +19,18 @@ Clock := [].{
 	shown : U64 -> U64
 	shown = |steps| 1 + steps // step_hz.to_u64()
 
-	# The Time panel shows from 50 s. Its text goes from black at 50 s to nearly full at 1 s.
-	brightness : U64 -> Try(F32, [Hidden])
-	brightness = |steps| {
-		seconds = shown(steps)
-		if seconds > fade_from {
-			Err(Hidden)
-		} else {
-			Ok((fade_from - seconds).to_f32() / fade_from.to_f32())
-		}
+	# A change from the original: the Time panel shows for the whole level. It shows at most
+	# the start time, so it does not read 1 more than the start time before the clock runs.
+	on_panel : U64, U64 -> U64
+	on_panel = |steps, start_seconds| shown(steps).min(start_seconds)
+
+	# The Time panel text is white above 50 s. As in the original, it goes black at 50 s,
+	# then fades in to nearly full at 1 s.
+	brightness : U64 -> F32
+	brightness = |seconds| if seconds > fade_from {
+		1.0
+	} else {
+		(fade_from - seconds).to_f32() / fade_from.to_f32()
 	}
 
 	# A tick plays each time the shown seconds drop to 20 or less, down to 1.
@@ -58,10 +61,13 @@ expect Clock.start(Clock.default_seconds) == 11880
 
 expect Clock.shown(Clock.start(99)) == 100 and Clock.shown(Clock.start(99) - 1) == 99 and Clock.shown(1) == 1 and Clock.shown(0) == 1
 
-expect Clock.brightness(Clock.start(50)) == Err(Hidden)
-expect Clock.brightness(Clock.start(50) - 1) == Ok(0.0)
-expect Clock.brightness(Clock.start(45) - 1) == Ok(0.1)
-expect Clock.brightness(0) == Ok(0.98)
+expect Clock.on_panel(Clock.start(99), 99) == 99 and Clock.on_panel(Clock.start(98), 99) == 99 and Clock.on_panel(Clock.start(98) - 1, 99) == 98
+expect Clock.on_panel(Clock.start(45), 45) == 45 and Clock.on_panel(1, 99) == 1
+
+expect Clock.brightness(99) == 1.0 and Clock.brightness(51) == 1.0
+expect Clock.brightness(50) == 0.0
+expect Clock.brightness(45) == 0.1
+expect Clock.brightness(1) == 0.98
 
 expect Clock.tick(Clock.start(21), Clock.start(21) - 1) == Err(NoTick)
 expect Clock.tick(Clock.start(20), Clock.start(20) - 1) == Ok(510.0 / 7000.0)
