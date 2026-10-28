@@ -31,13 +31,13 @@ Rules := [].{
 	start_pause = 1.0
 
 	next_level : Model -> Model
-	next_level = |model| { ..start_numbered(model.meshes, model.level_number + 1, model.fruits), sounds: model.sounds, score: model.score, phase: Starting(start_pause) }
+	next_level = |model| begin_level(model, model.level_number + 1, model.fruits, model.score)
 
 	# Kula's addition: in Won, a press starts a fresh game on level 1. The original goes on to the next level.
 	play_again : Bool -> (Model -> Model)
 	play_again = |pressed| |model|
 		if pressed and model.phase == Won {
-			{ ..start_numbered(model.meshes, 1, Fruit.none), sounds: model.sounds, phase: Starting(start_pause) }
+			begin_level(model, 1, Fruit.none, Score.zero)
 		} else {
 			model
 		}
@@ -200,6 +200,10 @@ parse_or_crash = |text| match Level.parse(text) {
 	Ok(level) => level
 	Err(err) => crash "The level does not parse: ${Str.inspect(err)}"
 }
+
+# The new level keeps the loaded sounds and waits start_pause before play.
+begin_level : Rules.Model, U64, Fruit.Fruits, Score.Score -> Rules.Model
+begin_level = |model, level_number, fruits, score| { ..start_numbered(model.meshes, level_number, fruits), sounds: model.sounds, score, phase: Starting(Rules.start_pause) }
 
 start_numbered : World.Meshes, U64, Fruit.Fruits -> Rules.Model
 start_numbered = |meshes, level_number, fruits| start_parsed(meshes, level_number, parse_or_crash(Level.text(level_number)), fruits)

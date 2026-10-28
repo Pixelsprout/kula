@@ -68,7 +68,7 @@ step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model,
 step = |model, input, _results, dt| {
 	controls = read_controls(input)
 	# play_again runs before run_ending, so the South press that reaches Won does not also start a fresh game.
-	stages = [start_same_theme, Rules.play_again(controls.again), Rules.count_down(dt), Rules.run_ending(controls.jump, dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
+	stages = [start_same_theme, Rules.play_again(controls.play_again), Rules.count_down(dt), Rules.run_ending(controls.jump, dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
 	quit = if controls.quit {
 		[Quit]
@@ -132,7 +132,7 @@ tick = |before, after| match Clock.tick(before.clock, after.clock) {
 }
 
 # forward is held; the others are pressed in this step.
-Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, again : Bool, quit : Bool }
+Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, play_again : Bool, quit : Bool }
 
 # The keys and every connected pad drive the one ball.
 read_controls : Vocabulary.Input -> Controls
@@ -141,7 +141,7 @@ read_controls = |input| {
 	jump: Key.pressed(input, Space) or Button.pressed_any(input, South),
 	left: Key.pressed(input, Left) or Button.pressed_any(input, DpadLeft),
 	right: Key.pressed(input, Right) or Button.pressed_any(input, DpadRight),
-	again: Key.pressed(input, Enter) or Button.pressed_any(input, South),
+	play_again: Key.pressed(input, Enter) or Button.pressed_any(input, South),
 	quit: Key.pressed(input, Escape) or Button.pressed_any(input, Start),
 }
 
@@ -825,7 +825,6 @@ expect {
 enter : Vocabulary.Input
 enter = { ..idle, pressed: [Key.code(Enter)] }
 
-# A won game with a banked total, a full fruit set and a part-spent clock.
 won_game : Model
 won_game = { ..at_pose(on_level(3), { ..before_last_exit, cell: { x: 7, y: 1, z: 6 } }), phase: Won, keys_left: 0, pickups: [], score: { level: 0, total: 6000 }, fruits: { now: [Apple, Watermelon, Pumpkin], saved: [Apple, Watermelon, Pumpkin] }, clock: Clock.start(40) }
 
