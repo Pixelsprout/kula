@@ -116,7 +116,8 @@ All moves are on the grid. The ball does not start a new move until the
 current one ends, except for the cases in Controls.
 
 If Up is held when a roll or a jump ends, the next roll starts at once. The
-ball does not stop at the cell.
+ball does not stop at the cell. A landing on the open exit is the one
+exception: the ball stops there, and the level ends.
 
 ### Roll
 

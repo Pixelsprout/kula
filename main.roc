@@ -154,11 +154,13 @@ read_input = |controls| |model| match (model.phase, action(controls)) {
 	_ => model
 }
 
-# As in the original, held Up rolls on only in Playing, so a roll onto the exit stops at the cell centre.
+# As in the original, held Up rolls on only in Playing, so a roll onto the exit
+# stops at the cell centre. A landing on the open exit ends the level in the next
+# step, so held Up does not roll the ball off it.
 move_ball : Controls, F32 -> (Model -> Model)
 move_ball = |controls, dt| |model|
 	if controls.forward and model.phase == Playing {
-		{ ..model, ball: Ball.advance_up_held(model.level.blocks, model.ball, dt) }
+		{ ..model, ball: Ball.advance_up_held(model.level.blocks, model.ball, dt, |pose| Rules.open_exit_at(model, pose)) }
 	} else {
 		{ ..model, ball: Ball.advance(model.ball, dt) }
 	}
@@ -662,6 +664,15 @@ expect {
 						and [rolling, reached, waiting, ended].all(|s| s.commands == [])
 							and stopped.ball.motion == Still
 								and stopped.ball.pose.cell == exit_cell
+}
+
+# A forward jump onto the open exit with Up held stops on the exit, and the level ends in the next step.
+expect {
+	open = { ..at_pose(column, { ..before_exit, cell: { x: 0, y: 1, z: 2 } }), keys_left: 0 }
+	jumped = step(open, forward_jump, QueryResults.empty, 0.01).model
+	landed = step(jumped, up_held, QueryResults.empty, 0.6).model
+	ended = step(landed, up_held, QueryResults.empty, 0.01).model
+	landed.phase == Exiting(0.0) and landed.ball.motion == Still and ended.phase == Ending({ ..Ending.start(0), seconds: 0.01 }) and ended.ball.pose.cell == exit_cell and ended.ball.motion == Still
 }
 
 # After the level end, the ball hides and the camera turns about the level.

@@ -116,12 +116,15 @@ Rules := [].{
 	exit_open : Model -> Bool
 	exit_open = |model| model.keys_left == 0
 
+	open_exit_at : Model, World.Pose -> Bool
+	open_exit_at = |model, pose| exit_open(model) and has_item(model.level, pose, Exit)
+
 	# As in the original, a landing on the open exit ends the level in the next
 	# step. A roll ends it 5 PAL frames after the ball reaches the exit cell, and
 	# the ball rolls on toward the cell centre.
 	exit : Model -> Model
 	exit = |model|
-		if model.phase == Playing and exit_open(model) and on_exit(model) {
+		if model.phase == Playing and on_open_exit(model) {
 			{
 				..model,
 				phase: Exiting(
@@ -167,9 +170,9 @@ plays = |phase| match phase {
 	_ => False
 }
 
-on_exit : Rules.Model -> Bool
-on_exit = |model| match Ball.standing(model.ball) {
-	Ok(pose) => has_item(model.level, pose, Exit)
+on_open_exit : Rules.Model -> Bool
+on_open_exit = |model| match Ball.standing(model.ball) {
+	Ok(pose) => Rules.open_exit_at(model, pose)
 	Err(InAir) => False
 }
 

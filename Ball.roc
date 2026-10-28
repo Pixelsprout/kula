@@ -254,11 +254,12 @@ Ball := [].{
 
 	# With Up held, a roll or jump that ends this step starts the next roll in the
 	# same step. The next roll gets the time left over, so the ball keeps its speed.
-	advance_up_held : Set(World.Cell), Ball.Ball, F32 -> Ball.Ball
-	advance_up_held = |blocks, ball, dt| {
+	# A landing on a pose where stops_at is True stays there.
+	advance_up_held : Set(World.Cell), Ball.Ball, F32, (World.Pose -> Bool) -> Ball.Ball
+	advance_up_held = |blocks, ball, dt, stops_at| {
 		moved = move(ball, dt, Held)
 		match (moved.motion, moved.turn) {
-			(Still, Steady) if ball.motion != Still => {
+			(Still, Steady) if ball.motion != Still and !(can_touch_down(ball.motion) and stops_at(moved.pose)) => {
 				# One roll at most, so a long step cannot chain rolls past a pickup.
 				busy = seconds_left(ball)
 				turning = turn_seconds_left(ball)
@@ -1038,7 +1039,7 @@ expect near_quat(Ball.advance(Ball.act(floor_ahead, still, forward_jump), 0.54).
 # The spin carries on into the next roll with no jump in angle.
 expect {
 	jumping = Ball.act(long_floor, still, forward_jump)
-	ball = Ball.advance_up_held(long_floor, jumping, 0.67)
+	ball = Ball.advance_up_held(long_floor, jumping, 0.67, nowhere)
 	near_quat(ball.rot, x_axis_spin(0.54 * top_spin + 0.5 / Ball.radius))
 }
 
@@ -1064,13 +1065,13 @@ expect {
 # With Up held, the drop keeps the top rate.
 expect {
 	falling = Ball.act(deep_drop, still, forward_jump)
-	near_quat(Ball.advance_up_held(deep_drop, falling, 1.54).rot, x_axis_spin(1.54 * top_spin))
+	near_quat(Ball.advance_up_held(deep_drop, falling, 1.54, nowhere).rot, x_axis_spin(1.54 * top_spin))
 }
 
 # With Up held again, the rate climbs back to the top.
 expect {
 	slowed = Ball.advance(Ball.act(deep_drop, still, forward_jump), 0.94)
-	near(fall_spin_rate(Ball.advance_up_held(deep_drop, slowed, 0.04)), 0.8 * top_spin) and fall_spin_rate(Ball.advance_up_held(deep_drop, slowed, 0.1)) == top_spin
+	near(fall_spin_rate(Ball.advance_up_held(deep_drop, slowed, 0.04, nowhere)), 0.8 * top_spin) and fall_spin_rate(Ball.advance_up_held(deep_drop, slowed, 0.1, nowhere)) == top_spin
 }
 
 # The fall spin does not depend on how the steps fall, also across the arc's end.
@@ -1179,9 +1180,12 @@ expect {
 near : F32, F32 -> Bool
 near = |a, b| (a - b).abs() < 0.0001
 
+nowhere : World.Pose -> Bool
+nowhere = |_| False
+
 # With Up held, the next roll starts in the step the last one ends, with the time left over.
 expect {
-	ball = Ball.advance_up_held(long_floor, rolling_at(0.5), 0.26)
+	ball = Ball.advance_up_held(long_floor, rolling_at(0.5), 0.26, nowhere)
 	ball.pose.cell == cell(0, 1, -2) and match ball.motion {
 		Rolling({ from, t }) => from.cell == cell(0, 1, -1) and near(t, 0.5)
 		_ => False
@@ -1190,17 +1194,25 @@ expect {
 
 expect {
 	jumping = Ball.act(long_floor, still, forward_jump)
-	ball = Ball.advance_up_held(long_floor, jumping, 0.54)
+	ball = Ball.advance_up_held(long_floor, jumping, 0.54, nowhere)
 	ball.pose.cell == cell(0, 1, -3) and match ball.motion {
 		Rolling({ t, .. }) => near(t, 0.0)
 		_ => False
 	}
 }
 
+# A landing where the ball stops does not roll on with Up held. A roll that ends there does.
+expect {
+	jumping = Ball.act(long_floor, still, forward_jump)
+	landed = Ball.advance_up_held(long_floor, jumping, 0.6, |pose| pose == jumping.pose)
+	rolled = Ball.advance_up_held(long_floor, rolling_at(0.5), 0.26, |pose| pose.cell == cell(0, 1, -1))
+	landed.motion == Still and landed.pose == jumping.pose and rolled.motion != Still
+}
+
 # A turn that outlasts the jump in place holds the roll back.
 expect {
 	turning = Ball.act(floor_ahead, Ball.advance(Ball.act(floor_ahead, still, in_place), 0.4), TurnLeft)
-	Ball.advance_up_held(floor_ahead, turning, 0.2).motion == Still
+	Ball.advance_up_held(floor_ahead, turning, 0.2, nowhere).motion == Still
 }
 
 expect Ball.advance(rolling_at(0.5), 0.26).motion == Still
@@ -1213,7 +1225,7 @@ expect Ball.act(blocks([cell(0, 0, 0), cell(0, 1, -2)]), still, in_place).motion
 expect {
 	west = blocks([cell(0, 0, 0), cell(-1, 0, 0)])
 	turning = Ball.act(west, Ball.advance(Ball.act(west, still, in_place), 0.4), TurnLeft)
-	ball = Ball.advance_up_held(west, turning, 0.52)
+	ball = Ball.advance_up_held(west, turning, 0.52, nowhere)
 	ball.pose.cell == cell(-1, 1, 0) and match ball.motion {
 		Rolling({ t, .. }) => near(t, 0.2 / roll_seconds(Floor))
 		_ => False
@@ -1250,7 +1262,7 @@ expect {
 # A forward jump lands in the step it ends, also when Up held starts the next roll in that step.
 expect {
 	jumping = Ball.act(long_floor, still, forward_jump)
-	!Ball.landed(jumping, Ball.advance(jumping, 0.53)) and Ball.landed(jumping, Ball.advance(jumping, 0.54)) and Ball.landed(jumping, Ball.advance_up_held(long_floor, jumping, 0.6))
+	!Ball.landed(jumping, Ball.advance(jumping, 0.53)) and Ball.landed(jumping, Ball.advance(jumping, 0.54)) and Ball.landed(jumping, Ball.advance_up_held(long_floor, jumping, 0.6, nowhere))
 }
 
 # A fall onto a block lands. A fall off the level does not, though the restart leaves the ball Still.
@@ -1442,7 +1454,7 @@ expect {
 
 # With Up held, the squish runs on into the next roll.
 expect {
-	landed = Ball.advance_up_held(long_floor, Ball.act(long_floor, still, forward_jump), 0.6)
+	landed = Ball.advance_up_held(long_floor, Ball.act(long_floor, still, forward_jump), 0.6, nowhere)
 	match (landed.motion, landed.squish) {
 		(Rolling(_), Squashing(seconds)) => near(seconds, 0.06)
 		_ => False
