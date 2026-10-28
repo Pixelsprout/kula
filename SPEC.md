@@ -387,7 +387,7 @@ sum of `dt` would (Inferred).
 | At 0 | `levelEndReason = LEVEL_END_TIME_OUT` (`level_update3.c:1149-1151`). A time out is a death, the same as a fall: the same penalty and a restart of the same level (`main.c:907-914`) | Code | The level restarts with `Score.die` in the step the clock reaches 0, the same as a fall. No time-out screen |
 | After a restart | `LevelInit` sets the clock again (`level_update2.c:347-351`) | Code (`LevelInit`), Inferred (that a restart runs it) | The clock goes back to the start time |
 | Shown seconds | `1 + levelTimeLeft / 50`, two digits (`hud.c:270`) | Code | `Clock.shown`: 1 + steps left / 120. It reads 1 in the last second |
-| Time panel | The digits show only at 50 s or less. Their colour goes from 0 at 50 s to `(50 - secs) × 128 / 50` (`hud.c:271-283`), so they fade in from black. An hourglass shows above them at all times | Code | `Time n` in a panel at the top centre (`time` in `Hud.roc`), only at 50 s or less. The text colour goes from black at 50 s to 49/50 of white at 1 s. No hourglass |
+| Time panel | The digits show only at 50 s or less. Their colour goes from 0 at 50 s to `(50 - secs) × 128 / 50` (`hud.c:271-283`), so they fade in from black. An hourglass shows above them at all times | Code | A change from the original: `Time n` shows in a panel at the top centre (`time` in `Hud.roc`) for the whole level, from the level start, because Kula has no hourglass to show that the clock runs. Above 50 s the text is white. At 50 s it goes black, then fades in to 49/50 of white at 1 s, as in the original. The panel shows at most the start time (`Clock.on_panel`), so it reads `Time 99`, not 100, before the clock runs |
 | Tick | In the last 20 s, `SFX_HOURGLASS_TICK` plays when `levelTimeLeft` steps from a multiple of 50 to 1 below it, while the level plays (`main.c:640-647`). So it plays as the shown seconds drop to 20, 19 and so on to 1 | Code (condition), Inferred (when it fires) | Same. `Clock.tick` compares the clock before and after the step |
 | Tick volume | `8000 - 10 × (levelTimeLeft - 250)`: 510 as the time drops to 20 s, 10010 as it drops to 1 s (`main.c:643-646`). The landing bounce plays at 7000 (`player_movement.c:693`) | Code | Gain (10510 - 500 n) / 7000 as the time drops to n: 0.07 at 20, 1.43 at 1. The bounce plays at gain 1 |
 | Tick tag | Each other second passes 37000 instead of 0 as the second argument of `SndPlaySfx`. That argument is a tag, not a pitch (`snd.c:155`) | Code | One tick sound at pitch 1 |
@@ -436,7 +436,7 @@ total and a `Press Enter to play again` prompt.
 | Level score | 7 digits at x 100, y 218 (`hud.c:142`, `sprite_init.c:511`) | Code | `Level n` in a panel at the bottom, 30% of the way across |
 | Total score | 7 digits at x 100, y 236, under the level score (`hud.c:135`, `sprite_init.c:510`) | Code | `Score n` under `Level n` in the same panel |
 | Fruit | Five icons at the bottom right, each lit when its bit is set (`hud.c:468-487`). With all five, the icons turn into BONUS letters | Code | `Fruit n / 5` in a panel at the bottom right, where n counts the fruit set. No BONUS letters |
-| Time | An hourglass and digits at the top centre (`hud.c:270-287`) | Code | `Time n` in its own panel at the top centre, no hourglass. See Level clock |
+| Time | An hourglass and digits at the top centre (`hud.c:270-287`) | Code | A change from the original: `Time n` in its own panel at the top centre at all times, no hourglass. See Level clock |
 
 ## Not copied
 

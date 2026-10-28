@@ -283,9 +283,12 @@ Kula copies the original's level clock. See `SPEC.md`, Level clock.
 - At 0 the level restarts, the same as a fall, and the fall's penalty comes
   off the total score.
 - A restart sets the clock back to the start time.
-- At 50 s or less, a panel at the top centre shows `Time n`. Its text fades
-  in from black. As in the original, `n` is 1 more than the whole seconds
-  left, so the panel reads `Time 1` in the last second.
+- A panel at the top centre shows `Time n` for the whole level. This is a
+  change from the original, which shows only an hourglass above 50 s. At the
+  level start the panel reads the start time, `Time 99` on Hiro levels 1 to 3.
+- Above 50 s the text is white. At 50 s it goes black, then fades in. As in
+  the original, `n` is 1 more than the whole seconds left, so the panel
+  reads `Time 1` in the last second.
 - In the last 20 s, a tick plays each time `n` drops, louder each time.
 
 ## Levels and Themes
