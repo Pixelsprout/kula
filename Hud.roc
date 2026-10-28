@@ -35,7 +35,7 @@ end_panels = |model, ending| {
 	before = model.score.total - ending.banked
 	shown = Ending.banner(ending)
 	banner = Box(
-		{ ..Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), pad: Ui.pad_all(16.0), background: { r: 0.0, g: 0.0, b: 0.0, a: 0.5 * shown } },
+		{ ..top_centre, pad: Ui.pad_all(16.0), background: { r: 0.0, g: 0.0, b: 0.0, a: 0.5 * shown } },
 		[Text({ ..Ui.label("WELL DONE"), size: 56.0, color: { r: 1.0, g: 0.85, b: 0.2, a: shown } })],
 	)
 	scores = Box({ ..panel, direction: Col, gap: 4.0 }, [Text(Ui.label("Level ${counted.to_str()}")), Text(Ui.label("Score ${(before + counted).to_str()}"))])
@@ -55,12 +55,15 @@ end_panels = |model, ending| {
 summary_drop : F32
 summary_drop = 120.0
 
-# As in the original, the Time panel sits at the top centre.
+# As in the original, the WELL DONE banner and the Time panel sit at the top centre.
+top_centre : Ui.BoxConfig
+top_centre = Ui.panel(CenterTop, { x: 0.0, y: 16.0 })
+
 time : Rules.Model -> Element
 time = |model| {
-	seconds = Clock.on_panel(model.clock, model.level.time)
-	shade = Clock.brightness(seconds)
-	Box(Ui.panel(CenterTop, { x: 0.0, y: 16.0 }), [Text({ ..Ui.label("Time ${seconds.to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])
+	shown_seconds = Clock.panel_seconds({ steps_left: model.clock, start_seconds: model.level.time })
+	shade = Clock.panel_shade({ seconds: shown_seconds })
+	Box(top_centre, [Text({ ..Ui.label("Time ${shown_seconds.to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])
 }
 
 # The original's screen is 320 pixels wide. It draws the keys at x 16 and the
@@ -107,25 +110,33 @@ one_key = {
 	Rules.collect({ ..start, ball: Ball.start({ ..start.ball.pose, cell: { x: 3, y: 1, z: 3 } }) })
 }
 
-# The HUD's first root is one row along the bottom: the keys panel, then the scores panel.
+texts : Element -> List(Str)
+texts = |element| match element {
+	Box(_, children) => children.map(texts).join()
+	Text(text) => [text.str]
+}
+
+# The one HUD root with a text that starts with prefix.
+root_with : Rules.Model, Str -> Try(Element, [NoPanel])
+root_with = |model, prefix| match Hud.ui(model).keep_if(|root| texts(root).any(|str| str.starts_with(prefix))) {
+	[root] => Ok(root)
+	_ => Err(NoPanel)
+}
+
+# The keys panel and the scores panel share one row along the bottom.
 expect
-	match Hud.ui(Rules.start(View.primitive_meshes, 1)) {
-		[Box(row, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _, _] =>
-			row.floating == Float({ attach: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and keys_text == Ui.label("Keys 0 / 1") and level.str == "Level 0" and total.str == "Score 0"
+	match root_with(Rules.start(View.primitive_meshes, 1), "Keys") {
+		Ok(Box(row, [Box(_, [keys_panel]), scores_panel])) =>
+			row.floating == Float({ attach: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and texts(keys_panel) == ["Keys 0 / 1"] and texts(scores_panel) == ["Level 0", "Score 0"]
 		_ => Bool.False
 	}
 
-expect
-	match Hud.ui({ ..one_key, score: { ..one_key.score, total: 2500 } }) {
-		[Box(_, [Box(_, [Box(_, [Text(keys_text)])]), Box(_, [Text(level), Text(total)])]), _, _] => keys_text.str == "Keys 1 / 1" and level.str == "Level 1000" and total.str == "Score 2500"
-		_ => Bool.False
-	}
+expect root_with({ ..one_key, score: { ..one_key.score, total: 2500 } }, "Keys").map_ok(texts) == Ok(["Keys 1 / 1", "Level 1000", "Score 2500"])
 
-# The Time panel is the third root, at the top centre. It gives the text and its grey shade.
 time_panel : Rules.Model -> Try({ str : Str, shade : F32 }, [NoPanel])
-time_panel = |model| match Hud.ui(model) {
-	[_, _, Box(time_box, [Text(text)]), ..] =>
-		if time_box.floating == Float({ attach: CenterTop, offset: { x: 0.0, y: 16.0 } }) and text.color.r == text.color.g and text.color.g == text.color.b and text.color.a == 1.0 {
+time_panel = |model| match root_with(model, "Time ") {
+	Ok(Box(time_box, [Text(text)])) =>
+		if time_box.floating == top_centre.floating and text.color.r == text.color.g and text.color.g == text.color.b and text.color.a == 1.0 {
 			Ok({ str: text.str, shade: text.color.r })
 		} else {
 			Err(NoPanel)
@@ -133,22 +144,24 @@ time_panel = |model| match Hud.ui(model) {
 	_ => Err(NoPanel)
 }
 
+level_one_at : U64 -> Rules.Model
+level_one_at = |clock| { ..Rules.start(View.primitive_meshes, 1), clock }
+
 # The panel shows from the level start in white, also in the Starting wait before a level.
 expect time_panel(Rules.start(View.primitive_meshes, 1)) == Ok({ str: "Time 99", shade: 1.0 })
 expect time_panel({ ..Rules.start(View.primitive_meshes, 2), phase: Starting(1.0) }) == Ok({ str: "Time 99", shade: 1.0 })
 
-# At 50 s the text goes black, then fades in: a tenth of the way at 45 s.
-expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(50) }) == Ok({ str: "Time 51", shade: 1.0 })
-expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(50) - 1 }) == Ok({ str: "Time 50", shade: 0.0 })
-expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(45) - 1 }) == Ok({ str: "Time 45", shade: 0.1 })
-
-# In the last 20 s the panel goes on fading in, to nearly white in the last second.
-expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: Clock.start(10) - 1 }) == Ok({ str: "Time 10", shade: 0.8 })
-expect time_panel({ ..Rules.start(View.primitive_meshes, 1), clock: 1 }) == Ok({ str: "Time 1", shade: 0.98 })
+# From 50 s the text dims to grey, then goes back to white by the last second.
+expect time_panel(level_one_at(Clock.start(50))) == Ok({ str: "Time 51", shade: 1.0 })
+expect time_panel(level_one_at(Clock.start(50) - 1)) == Ok({ str: "Time 50", shade: 1.0 })
+expect time_panel(level_one_at(Clock.start(45) - 1)) == Ok({ str: "Time 45", shade: Clock.panel_shade({ seconds: 45 }) })
+expect time_panel(level_one_at(Clock.start(25) - 1)) == Ok({ str: "Time 25", shade: Clock.panel_shade({ seconds: 25 }) })
+expect time_panel(level_one_at(Clock.start(10) - 1)) == Ok({ str: "Time 10", shade: Clock.panel_shade({ seconds: 10 }) })
+expect time_panel(level_one_at(1)) == Ok({ str: "Time 1", shade: Clock.panel_shade({ seconds: 1 }) })
 
 fruit_text : Rules.Model -> Str
-fruit_text = |model| match Hud.ui(model) {
-	[_, Box(corner, [Box(_, [Text(text)])]), ..] =>
+fruit_text = |model| match root_with(model, "Fruit") {
+	Ok(Box(corner, [Box(_, [Text(text)])])) =>
 		if corner.floating == Float({ attach: RightBottom, offset: { x: 0.0, y: 0.0 } }) {
 			text.str
 		} else {

@@ -21,16 +21,21 @@ Clock := [].{
 
 	# A change from the original: the Time panel shows for the whole level. It shows at most
 	# the start time, so it does not read 1 more than the start time before the clock runs.
-	on_panel : U64, U64 -> U64
-	on_panel = |steps, start_seconds| shown(steps).min(start_seconds)
+	panel_seconds : { steps_left : U64, start_seconds : U64 } -> U64
+	panel_seconds = |{ steps_left, start_seconds }| shown(steps_left).min(start_seconds)
 
-	# The Time panel text is white above 50 s. As in the original, it goes black at 50 s,
-	# then fades in to nearly full at 1 s.
-	brightness : U64 -> F32
-	brightness = |seconds| if seconds > fade_from {
+	# A change from the original, which turns the digits black at 50 s and fades them in.
+	# Kula dims the white text to grey and back over the last 50 s, so it does not flash.
+	panel_shade : { seconds : U64 } -> F32
+	panel_shade = |{ seconds }| if seconds >= dim_from {
 		1.0
 	} else {
-		(fade_from - seconds).to_f32() / fade_from.to_f32()
+		from_grey = if seconds > grey_at {
+			seconds - grey_at
+		} else {
+			grey_at - seconds
+		}
+		grey + (1.0 - grey) * from_grey.to_f32() / grey_at.to_f32()
 	}
 
 	# A tick plays each time the shown seconds drop to 20 or less, down to 1.
@@ -46,8 +51,15 @@ Clock := [].{
 	}
 }
 
-fade_from : U64
-fade_from = 50
+dim_from : U64
+dim_from = 50
+
+grey_at : U64
+grey_at = dim_from // 2
+
+# Dark enough to see the change, light enough to read over the half-black panel on the Hiro sky.
+grey : F32
+grey = 0.6
 
 tick_from : U64
 tick_from = 20
@@ -61,13 +73,23 @@ expect Clock.start(Clock.default_seconds) == 11880
 
 expect Clock.shown(Clock.start(99)) == 100 and Clock.shown(Clock.start(99) - 1) == 99 and Clock.shown(1) == 1 and Clock.shown(0) == 1
 
-expect Clock.on_panel(Clock.start(99), 99) == 99 and Clock.on_panel(Clock.start(98), 99) == 99 and Clock.on_panel(Clock.start(98) - 1, 99) == 98
-expect Clock.on_panel(Clock.start(45), 45) == 45 and Clock.on_panel(1, 99) == 1
+expect Clock.panel_seconds({ steps_left: Clock.start(99), start_seconds: 99 }) == 99
+expect Clock.panel_seconds({ steps_left: Clock.start(98), start_seconds: 99 }) == 99 and Clock.panel_seconds({ steps_left: Clock.start(98) - 1, start_seconds: 99 }) == 98
+expect Clock.panel_seconds({ steps_left: Clock.start(45), start_seconds: 45 }) == 45 and Clock.panel_seconds({ steps_left: 1, start_seconds: 99 }) == 1
 
-expect Clock.brightness(99) == 1.0 and Clock.brightness(51) == 1.0
-expect Clock.brightness(50) == 0.0
-expect Clock.brightness(45) == 0.1
-expect Clock.brightness(1) == 0.98
+near : F32, F32 -> Bool
+near = |a, b| (a - b).abs() < 0.0001
+
+expect Clock.panel_shade({ seconds: 99 }) == 1.0 and Clock.panel_shade({ seconds: 51 }) == 1.0 and Clock.panel_shade({ seconds: 50 }) == 1.0
+expect near(Clock.panel_shade({ seconds: 45 }), 0.92) and near(Clock.panel_shade({ seconds: 25 }), 0.6) and near(Clock.panel_shade({ seconds: 10 }), 0.84)
+expect near(Clock.panel_shade({ seconds: 1 }), 0.984)
+
+# The shade never jumps from one second to the next.
+expect {
+	shades = List.repeat(0, 60).map_with_index(|_, i| Clock.panel_shade({ seconds: i.to_u64() }))
+	steps = shades.drop_first(1).map_with_index(|shade, i| (shade - shades.get(i).ok_or(0.0)).abs())
+	steps.all(|step| step < 0.017)
+}
 
 expect Clock.tick(Clock.start(21), Clock.start(21) - 1) == Err(NoTick)
 expect Clock.tick(Clock.start(20), Clock.start(20) - 1) == Ok(510.0 / 7000.0)
