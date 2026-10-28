@@ -1,56 +1,46 @@
 import linalg.Quat
 import linalg.Vec3
 import mesh.Mesh
-import pf.Vocabulary exposing [Camera, Draw, Manifest, Rgb]
+import pf.Vocabulary exposing [Camera, Manifest, Rgb]
+import pf.Draw
 import World
 import Grid
 import Ball
+import Clock
 
 View := [].{
 	# The kula pack's meshes. Each Theme names its own assets.
 	assets : List(Str)
-	assets = ["ball"]
+	assets = ["ball", "coin", "apple", "watermelon", "pumpkin", "key"]
 
-	# Keys stay primitive cubes until a key mesh exists. face and ball are 0, the fallback, and sky is 0, no sky, until loaded.
+	# A banana and a strawberry stay primitive spheres. The loaded meshes are 0, the fallback, and sky is 0, no sky, until loaded.
 	primitive_meshes : World.Meshes
-	primitive_meshes = { cube: Mesh.primitive(Cube), face: 0, ball: 0, sky: 0 }
+	primitive_meshes = { sphere: Mesh.primitive(Sphere), face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, key: 0, sky: 0 }
 
 	kula_meshes : World.Meshes, Manifest -> World.Meshes
-	kula_meshes = |meshes, manifest| { ..meshes, ball: Mesh.resolve(manifest, "ball") }
+	kula_meshes = |meshes, manifest| {
+		..meshes,
+		ball: Mesh.resolve(manifest, "ball"),
+		coin: Mesh.resolve(manifest, "coin"),
+		apple: Mesh.resolve(manifest, "apple"),
+		watermelon: Mesh.resolve(manifest, "watermelon"),
+		pumpkin: Mesh.resolve(manifest, "pumpkin"),
+		key: Mesh.resolve(manifest, "key"),
+	}
 
 	theme_meshes : World.Meshes, Manifest, Str, Str -> World.Meshes
 	theme_meshes = |meshes, manifest, face, sky| { ..meshes, face: Mesh.resolve(manifest, face), sky: Mesh.resolve(manifest, sky) }
 
-	Placement : { pos : Vec3.Vec3, up : Vec3.Vec3, forward : Vec3.Vec3 }
-
-	interpolated : Ball.Ball -> Placement
-	interpolated = |ball| {
-		placed = match ball.motion {
-			Still => placement_of(ball.pose)
-			Rolling({ from, t }) => between(from, ball.pose, t)
-			Jumping({ from, offset, t }) => lifted(jump_placement(from, offset, ball.pose, t), Ball.jump_lift(t))
-			JumpingInPlace({ t }) => lifted(placement_of(ball.pose), Ball.jump_lift(t))
-			Falling({ from, offset, over, seconds, .. }) => match Ball.fall_stage(seconds) {
-				Arc(t) => lifted(jump_placement(from, offset, over, t), Ball.jump_lift(t))
-				Dropped(cells) => lifted(placement_of(over), -cells)
-			}
-		}
-		match ball.turn {
-			Steady => placed
-			Turning({ from, t, .. }) => { ..placed, forward: between(from, ball.pose, t).forward }
-		}
-	}
-
-	# The idle bob squashes the ball along up, not along a spinning model axis.
-	# The centre drops as the ball squashes, so its bottom stays on the floor.
-	ball_draw : Ball.Ball, U32, Rgb -> Draw
+	# The idle bob and the landing squish squash the ball along up, not along a
+	# spinning model axis. The centre drops as the ball squashes, so its bottom stays on the floor.
+	ball_draw : Ball.Ball, U32, Rgb -> Vocabulary.Draw
 	ball_draw = |ball, mesh, tint| {
-		up = View.interpolated(ball).up
-		s = bob_amount * (2.0 * pi * ball.bob).sin()
-		pos = Vec3.sub(centre(ball), Vec3.scale(up, 2.0 * s * Ball.radius))
+		up = Ball.interpolated(ball).up
+		s = bob_amount * (2.0 * pi * ball.bob).sin() + Ball.squash(ball)
+		pos = Vec3.sub(Ball.centre(ball), Vec3.scale(up, 2.0 * s * Ball.radius))
 		scale = Vec3.scale({ x: 1.0 + s, y: 1.0 - 2.0 * s, z: 1.0 + s }, 2.0 * Ball.radius)
 		scale_rot = Quat.mul(Quat.conjugate(ball.rot), Quat.between({ x: 0.0, y: 1.0, z: 0.0 }, up))
-		{ id: 0, mesh, pos, scale, rot: ball.rot, scale_rot, tint }
+		{ ..Draw.default, id: 0, mesh, pos, scale, rot: ball.rot, scale_rot, tint }
 	}
 
 	# Rigid in the ball's frame, with no smoothing and no clipping test, as in the
@@ -58,11 +48,31 @@ View := [].{
 	# floor does not hide the ball only because blocks draw as one-sided faces.
 	camera : Ball.Ball -> Camera
 	camera = |ball| {
-		placed = interpolated(ball)
+		placed = Ball.interpolated(ball)
 		cam_forward = Vec3.sub(Vec3.scale(placed.forward, camera_pitch.cos()), Vec3.scale(placed.up, camera_pitch.sin()))
 		cam_up = Vec3.add(Vec3.scale(placed.forward, camera_pitch.sin()), Vec3.scale(placed.up, camera_pitch.cos()))
-		eye = Vec3.add(Vec3.sub(centre(ball), Vec3.scale(cam_forward, camera_depth)), Vec3.scale(cam_up, camera_drop))
+		eye = Vec3.add(Vec3.sub(Ball.centre(ball), Vec3.scale(cam_forward, camera_depth)), Vec3.scale(cam_up, camera_drop))
 		{ eye, target: Vec3.add(eye, cam_forward), up: cam_up, fov_y: camera_fov_y }
+	}
+
+	# The original's camera after a level end. It turns about the level centre on
+	# three axes at once and swings in and out. seconds counts from the level end.
+	orbit : Set(World.Cell), F32 -> Camera
+	orbit = |blocks, seconds| {
+		angle = |turns_a_second| turns_a_second * seconds * 2.0 * pi
+		axis = |x, y, z| { x, y, z }
+		# The original's view matrix is Rx Ry Rz. Its transpose turns the view axes into the world.
+		to_world = Quat.mul(
+			Quat.from_axis_angle(axis(0.0, 0.0, 1.0), -angle(orbit_z)),
+			Quat.mul(Quat.from_axis_angle(axis(0.0, 1.0, 0.0), -angle(orbit_y)), Quat.from_axis_angle(axis(1.0, 0.0, 0.0), -angle(orbit_x))),
+		)
+		forward = from_original(Quat.rotate(axis(0.0, 0.0, 1.0), to_world))
+		# The original's view y points down the screen.
+		up = Vec3.neg(from_original(Quat.rotate(axis(0.0, 1.0, 0.0), to_world)))
+		reach = level_reach(blocks)
+		distance = reach.radius + orbit_distance + orbit_swing * angle(swing_rate).sin()
+		eye = Vec3.sub(reach.centre, Vec3.scale(forward, distance))
+		{ eye, target: Vec3.add(eye, forward), up, fov_y: camera_fov_y }
 	}
 
 	Face : { block : World.Cell, normal : World.Cell }
@@ -92,10 +102,10 @@ View := [].{
 	}
 
 	# A Theme's face mesh, like the primitive plane, faces +y and is one-sided.
-	face_draw : U64, U32, Face, Rgb -> Draw
+	face_draw : U64, U32, Face, Rgb -> Vocabulary.Draw
 	face_draw = |id, mesh, face, tint| {
 		pos = Vec3.add(Grid.to_vec3(face.block), Vec3.scale(Grid.to_vec3(face.normal), 0.5))
-		{ id, mesh, pos, scale: Vec3.one, rot: face_rot(face.normal), scale_rot: Quat.identity, tint }
+		{ ..Draw.default, id, mesh, pos, rot: face_rot(face.normal), tint }
 	}
 }
 
@@ -109,6 +119,43 @@ camera_depth = 800.0 / 512.0
 
 camera_drop : F32
 camera_drop = 250.0 / 512.0
+
+# The original turns its level end view by -10, 4 and 13 of 4096 a PAL frame
+# about x, y and z. These are turns a second.
+orbit_x : F32
+orbit_x = -10.0 / 4096.0 / Clock.pal_frame
+
+orbit_y : F32
+orbit_y = 4.0 / 4096.0 / Clock.pal_frame
+
+orbit_z : F32
+orbit_z = 13.0 / 4096.0 / Clock.pal_frame
+
+# The original's zoom phase gains 15 of 4096 a PAL frame. The view sits
+# 1200 + 1400 units past the farthest block centre, plus 1000 sin(phase).
+swing_rate : F32
+swing_rate = 15.0 / 4096.0 / Clock.pal_frame
+
+orbit_distance : F32
+orbit_distance = 2600.0 / 512.0
+
+orbit_swing : F32
+orbit_swing = 1000.0 / 512.0
+
+# Kula (x, y, z) is the original's (x, -z, y), so the original's up, -z, is Kula's +y.
+from_original : Vec3.Vec3 -> Vec3.Vec3
+from_original = |v| { x: v.x, y: -v.z, z: v.y }
+
+# The centre of the blocks' bounding box, and the distance from it to the farthest block centre.
+level_reach : Set(World.Cell) -> { centre : Vec3.Vec3, radius : F32 }
+level_reach = |blocks| {
+	cells = blocks.to_list().map(Grid.to_vec3)
+	low = cells.fold(cells.first() ?? Vec3.zero, |a, c| { x: a.x.min(c.x), y: a.y.min(c.y), z: a.z.min(c.z) })
+	high = cells.fold(cells.first() ?? Vec3.zero, |a, c| { x: a.x.max(c.x), y: a.y.max(c.y), z: a.z.max(c.z) })
+	centre = Vec3.scale(Vec3.add(low, high), 0.5)
+	radius = cells.fold(0.0, |far, c| far.max(Vec3.length(Vec3.sub(c, centre))))
+	{ centre, radius }
+}
 
 # 73.7 degrees, from the original's 90 degree horizontal view on 4:3.
 camera_fov_y : F32
@@ -140,36 +187,6 @@ pi = 3.1415927
 # The original's peak bob, 200 of 4096. See SPEC.md.
 bob_amount : F32
 bob_amount = 200.0 / 4096.0
-
-# The centre rests one radius above the face. Round an edge it follows the
-# original's path: half a cell to the edge, a quarter circle of one radius
-# about the edge line, then half a cell down the side.
-centre : Ball.Ball -> Vec3.Vec3
-centre = |ball| match ball.motion {
-	Rolling({ from, t }) if Ball.roll_kind(from, ball.pose) == Edge => edge_centre(from, t)
-	_ => {
-		placed = View.interpolated(ball)
-		Vec3.sub(placed.pos, Vec3.scale(placed.up, 0.5 - Ball.radius))
-	}
-}
-
-edge_centre : World.Pose, F32 -> Vec3.Vec3
-edge_centre = |from, t| {
-	up = Grid.to_vec3(from.up)
-	forward = Grid.to_vec3(from.forward)
-	r = Ball.radius
-	edge = Vec3.add(Grid.to_vec3(Grid.sub(from.cell, from.up)), Vec3.scale(Vec3.add(up, forward), 0.5))
-	arc = pi / 2.0 * r
-	s = t * Ball.roll_length(Edge)
-	if s < 0.5 {
-		Vec3.add(edge, Vec3.add(Vec3.scale(up, r), Vec3.scale(forward, s - 0.5)))
-	} else if s < 0.5 + arc {
-		a = (s - 0.5) / r
-		Vec3.add(edge, Vec3.add(Vec3.scale(up, r * a.cos()), Vec3.scale(forward, r * a.sin())))
-	} else {
-		Vec3.sub(Vec3.add(edge, Vec3.scale(forward, r)), Vec3.scale(up, s - 0.5 - arc))
-	}
-}
 
 near_window : Camera -> List(Vec3.Vec3)
 near_window = |cam| {
@@ -204,25 +221,6 @@ face_rot = |normal| {
 	}
 }
 
-jump_placement : World.Pose, F32, World.Pose, F32 -> View.Placement
-jump_placement = |from, offset, to, t| {
-	placed = between(from, to, t)
-	{ ..placed, pos: Vec3.add(placed.pos, Vec3.scale(placed.forward, offset * (1.0 - t))) }
-}
-
-lifted : View.Placement, F32 -> View.Placement
-lifted = |placed, lift| { ..placed, pos: Vec3.add(placed.pos, Vec3.scale(placed.up, lift)) }
-
-placement_of : World.Pose -> View.Placement
-placement_of = |pose| { pos: Grid.to_vec3(pose.cell), up: Grid.to_vec3(pose.up), forward: Grid.to_vec3(pose.forward) }
-
-between : World.Pose, World.Pose, F32 -> View.Placement
-between = |from, to, t| {
-	a = placement_of(from)
-	b = placement_of(to)
-	{ pos: Vec3.lerp(a.pos, b.pos, t), up: Vec3.normalize(Vec3.lerp(a.up, b.up, t)), forward: Vec3.normalize(Vec3.lerp(a.forward, b.forward, t)) }
-}
-
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
 
@@ -241,42 +239,6 @@ white = { r: 1.0, g: 1.0, b: 1.0 }
 # For tests of the centre's path, which the bob would shift.
 unbobbed : Ball.Ball -> Ball.Ball
 unbobbed = |ball| { ..ball, bob: 0.0 }
-
-expect View.interpolated(Ball.start(on_origin)) == { pos: { x: 0.0, y: 1.0, z: 0.0 }, up: { x: 0.0, y: 1.0, z: 0.0 }, forward: { x: 0.0, y: 0.0, z: -1.0 } }
-
-expect {
-	half = Ball.advance(Ball.act(floor, Ball.start(on_origin), Roll), 0.13)
-	View.interpolated(half).pos == { x: 0.0, y: 1.0, z: -0.5 }
-}
-
-# Halfway round an edge, up and forward are each a unit diagonal.
-expect {
-	edge = Set.from_list([cell(0, 0, 0)])
-	placed = View.interpolated(Ball.advance(Ball.act(edge, Ball.start(on_origin), Roll), 0.17))
-	s = 0.70710678
-	near(placed.pos, { x: 0.0, y: 0.5, z: -0.5 }) and near(placed.up, { x: 0.0, y: s, z: -s }) and near(placed.forward, { x: 0.0, y: -s, z: -s })
-}
-
-# A jump peaks half a cell above the straight line at its midpoint.
-expect {
-	placed = View.interpolated(Ball.advance(Ball.act(floor, Ball.start(on_origin), Jump({ up_held: True })), 0.27))
-	near(placed.pos, { x: 0.0, y: 1.5, z: -1.0 })
-}
-
-# A jump into nothing drops to 2 cells below the lowest block.
-expect {
-	falling = Ball.act(Set.from_list([cell(0, 0, 0)]), Ball.start(on_origin), Jump({ up_held: True }))
-	near(View.interpolated(Ball.advance(falling, 2.0)).pos, { x: 0.0, y: -2.0, z: -2.0 })
-}
-
-# The drop starts where the jump arc ends, and ends on the floor below.
-expect {
-	falling = Ball.act(Set.from_list([cell(0, 0, 0), cell(0, -1, -2)]), Ball.start(on_origin), Jump({ up_held: True }))
-	at_arc_end = View.interpolated(Ball.advance(falling, 0.539)).pos
-	dropping = View.interpolated(Ball.advance(falling, 0.541)).pos
-	near_arc_end = Vec3.length(Vec3.sub(at_arc_end, { x: 0.0, y: 1.0, z: -2.0 })) < 0.01 and Vec3.length(Vec3.sub(dropping, { x: 0.0, y: 1.0, z: -2.0 })) < 0.01
-	near_arc_end and dropping.y < 1.0 and View.interpolated(Ball.advance(falling, 1.0)).pos == { x: 0.0, y: 0.0, z: -2.0 }
-}
 
 expect {
 	draw = View.ball_draw(Ball.start(on_origin), 2, white)
@@ -375,28 +337,6 @@ expect {
 	View.faces(behind).all(|face| !View.cut_by_near_plane(face, View.camera(mid_climb)))
 }
 
-# A jump in place rises half a cell and comes down on the same cell.
-expect {
-	jumping_in_place = Ball.act(floor, Ball.start(on_origin), Jump({ up_held: False }))
-	near(View.interpolated(Ball.advance(jumping_in_place, 0.27)).pos, { x: 0.0, y: 1.5, z: 0.0 }) and View.interpolated(Ball.advance(jumping_in_place, 0.54)).pos == { x: 0.0, y: 1.0, z: 0.0 }
-}
-
-# A jump from a roll starts where the ball is and ends on the landing cell.
-expect {
-	long = Set.from_list([cell(0, 0, 0), cell(0, 0, -1), cell(0, 0, -2), cell(0, 0, -3)])
-	rolling = Ball.advance(Ball.act(long, Ball.start(on_origin), Roll), 0.195)
-	jumping = Ball.act(long, rolling, Jump({ up_held: False }))
-	near(View.interpolated(jumping).pos, View.interpolated(rolling).pos) and near(View.interpolated(Ball.advance(jumping, 0.54)).pos, { x: 0.0, y: 1.0, z: -3.0 })
-}
-
-# Halfway through a turn during a jump in place, the ball faces between the two directions.
-expect {
-	jumping_in_place = Ball.act(floor, Ball.start(on_origin), Jump({ up_held: False }))
-	placed = View.interpolated(Ball.advance(Ball.act(floor, jumping_in_place, TurnLeft), 0.16))
-	s = 0.70710678
-	placed.pos.y > 1.0 and near(placed.forward, { x: -s, y: 0.0, z: -s })
-}
-
 # A jump from the approach to an edge starts where the ball is.
 expect {
 	gap = Set.from_list([cell(0, 0, 0), cell(0, 0, -2)])
@@ -447,4 +387,35 @@ expect {
 	on_ceiling = { cell: cell(0, -1, 0), up: cell(0, -1, 0), forward: cell(0, 0, -1) }
 	draw = View.ball_draw({ ..Ball.start(on_ceiling), bob: 0.25 }, 2, white)
 	(draw.pos.y + draw.scale.y / 2.0 + 0.5).abs() < 0.0001
+}
+
+# At its peak, 3 frames after the contact, the landing squish adds 748/4096 to the bob. The bottom stays on the floor.
+expect {
+	landed = Ball.advance(Ball.act(floor, Ball.start(on_origin), Jump({ up_held: True })), 0.54)
+	draw = View.ball_draw({ ..Ball.advance(landed, 0.06), bob: 0.25 }, 2, white)
+	s = (200.0 + 748.0) / 4096.0
+	d = 2.0 * Ball.radius
+	near(draw.scale, { x: d * (1.0 + s), y: d * (1.0 - 2.0 * s), z: d * (1.0 + s) }) and (draw.pos.y - draw.scale.y / 2.0 - 0.5).abs() < 0.0001
+}
+
+row_of_blocks : Set(World.Cell)
+row_of_blocks = Set.from_list([cell(0, 0, 0), cell(1, 0, 0), cell(2, 0, 0), cell(3, 0, 0), cell(4, 0, 0)])
+
+# At the level end the view looks straight down on the level centre.
+expect {
+	cam = View.orbit(row_of_blocks, 0.0)
+	near(cam.eye, { x: 2.0, y: 2.0 + 2600.0 / 512.0, z: 0.0 }) and near(Vec3.sub(cam.target, cam.eye), { x: 0.0, y: -1.0, z: 0.0 }) and near(cam.up, { x: 0.0, y: 0.0, z: -1.0 })
+}
+
+# Later the view has turned and swung in or out, and still looks at the level centre.
+expect {
+	cam = View.orbit(row_of_blocks, 3.0)
+	centre = { x: 2.0, y: 0.0, z: 0.0 }
+	distance = Vec3.length(Vec3.sub(centre, cam.eye))
+	forward = Vec3.sub(cam.target, cam.eye)
+	near(Vec3.scale(forward, distance), Vec3.sub(centre, cam.eye))
+		and distance >= 2.0 + (2600.0 - 1000.0) / 512.0
+			and distance <= 2.0 + (2600.0 + 1000.0) / 512.0
+				and !near(forward, { x: 0.0, y: -1.0, z: 0.0 })
+					and Vec3.dot(forward, cam.up).abs() < 0.0001
 }

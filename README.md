@@ -2,8 +2,8 @@
 
 A clone of Kula World (PS1, 1998) on the rocco engine. A ball rolls over a
 grid of blocks. Gravity turns when the ball rolls over an edge. Collect
-every key, then roll into the exit. Three levels follow one another, each
-in its own Theme.
+every key, then roll into the exit. The three levels are Hiro levels 1 to 3
+of the original. They follow one another in one Theme.
 
 `SPEC.md` holds the original's numbers and says which of them this clone
 copies.
@@ -11,7 +11,7 @@ copies.
 ## Run
 
 Kula needs only Roc. Install the Roc nightly `nightly-2026-10-11-7d256b9`.
-The v0.4.0 release built the bundles with it. Then, from this directory:
+The v0.6.0 release built the bundles with it. Then, from this directory:
 
 ```sh
 roc main.roc
@@ -20,14 +20,14 @@ roc test main.roc
 
 Roc downloads the platform and the packages from the bundle URLs in the
 `main.roc` header. They come from the
-[rocco v0.4.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.4.0):
+[rocco v0.6.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.6.0):
 
 | Bundle | URL |
 |---|---|
-| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/platform-CdUrA58dQQFQLxKFBNEc9vtFP652ZwvQ5Tb59GYDCrUQ.tar.zst |
-| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst |
-| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst |
-| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst |
+| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/platform-2gvPTPztQ7D8yQsMvRTD4rBKS8VmSwMCPZ432eWzNNtJ.tar.zst |
+| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst |
+| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/mesh-5Fmg6uFHADmSBmZxNWDg25VStK6mU7YqhkWEXHjMEGNP.tar.zst |
+| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst |
 
 To move to a new rocco release, copy the URLs and the nightly from its
 release notes into the header and this table.
@@ -60,7 +60,8 @@ same check with `scripts/check-header.sh`.
 
 `.github/workflows/ci.yml` runs on macOS arm64, Ubuntu and Windows with only
 Roc installed. It checks the header, then runs `roc fmt --check`, `roc check`,
-`roc test` and 30 frames of `roc main.roc` against the bundle URLs.
+`roc test` and 30 frames of `roc main.roc` against the bundle URLs. A
+`scripts` job on Ubuntu runs the tests of `scripts/convert_level.py`.
 
 ## Controls
 
@@ -72,10 +73,16 @@ Roc installed. It checks the header, then runs `roc fmt --check`, `roc check`,
 | Space | Jump in place |
 | Up and Space | Jump forward |
 | Space during a roll | Jump forward |
+| Enter, in `Won` | Start a fresh game on level 1 |
 | Escape | Quit |
+| Pad DpadUp, or the left stick more than half way up, held | Roll forward, as Up |
+| Pad DpadLeft | Turn 90° left |
+| Pad DpadRight | Turn 90° right |
+| Pad South | Jump, as Space. In `Won`, start a fresh game, as Enter |
+| Pad Start | Quit |
 
 Left, Right and Space act on the press. Hold Up to keep rolling. Escape
-quits at any time. The controls are tank controls: they are relative to the
+quits at any time. The pad buttons act the same way, on any connected pad. The controls are tank controls: they are relative to the
 ball, not to the screen.
 
 A move starts only when the ball is still and not turning. Two moves also
@@ -101,7 +108,7 @@ current one ends.
 | Face | One side of a block that touches an empty cell. Only faces draw. |
 | Commit | A move sets the new pose when it starts. The ball then moves to that pose over the time of the move. |
 | Open end | A block with no block to its left or right, as the ball sees it. Only an open end lets the ball roll over the edge. |
-| Phase | `Playing`, `Cleared`, `Starting` or `Won`. `Cleared` waits for the next Theme to load. In `Starting`, the ball waits before the next level plays. |
+| Phase | `Playing`, `Exiting`, `Ending`, `Cleared`, `Starting` or `Won`. In `Exiting`, the ball is on the open exit and the level ends soon. `Ending` shows the level end until a press. `Cleared` waits for the next Theme to load. In `Starting`, the ball waits before the next level plays. `Won` follows the last level end. |
 | Theme | The look of one level: a pack of a textured face and a sky, a sun and its lights. |
 
 ## Moves
@@ -110,7 +117,8 @@ All moves are on the grid. The ball does not start a new move until the
 current one ends, except for the cases in Controls.
 
 If Up is held when a roll or a jump ends, the next roll starts at once. The
-ball does not stop at the cell.
+ball does not stop at the cell. A landing on the open exit is the one
+exception: the ball stops there, and the level ends.
 
 ### Roll
 
@@ -140,7 +148,7 @@ A jump takes 0.54 s and rises half a cell. There are two kinds.
 **Jump in place.** Space while the ball is still and Up is not held. The
 ball rises and lands on the same cell. Left and Right turn the ball in the
 air. The turn can last longer than the jump. A block above the ball bounces
-the jump: the ball does not move.
+the jump: the ball hits the block, drops back and lands on its cell.
 
 **Forward jump.** Space while Up is held, Space during a floor roll, or
 Space during an edge roll before the ball reaches the edge. The jump aims
@@ -148,8 +156,13 @@ two cells ahead, at the same level. During a roll, the jump starts at once
 from where the ball is. It aims two cells past the cell the ball is nearest
 to. No input acts during a forward jump.
 
-- If a block is above the ball, or in either of the two cells ahead, the
-  jump bounces. A still ball does not move. A rolling ball rolls on.
+- If a block is in either of the two cells ahead, the jump bounces. The
+  jump bounces too if the rising ball, high enough, is under a block. A
+  block above the next cell counts once the ball reaches over the cell
+  line, which a jump from a still ball does at once. The ball hits the
+  block and drops back onto the cell nearest the hit: its own cell for a
+  block above or one ahead, the cell between for a block two ahead. With no
+  block under that cell, it falls on.
 - If a block is under the landing cell, the ball lands there.
 - If no block is under the landing cell, the ball falls.
 
@@ -159,37 +172,149 @@ never lands on top of the block ahead. To get onto a wall, roll into it.
 The ball can land only in the last 11 of the jump's 27 frames. On level
 ground it lands when the jump ends.
 
+Each landing on a block squashes the ball for 0.54 s, as in the original.
+
 ### Fall and restart
 
 A fall drops the ball three cells along `-up` over 0.5 s. When the fall
 ends, the level restarts: the ball goes back to the start, the keys come
-back and the exit closes.
+back and the exit closes. The fall also costs points. See Score.
 
 ## Keys and the exit
 
-- A key sits on the top face of a block. The ball collects it when a move
-  into its cell commits. A collected key disappears.
+- A key is a gold key that stands on one face of a block. It spins and bobs
+  above the face.
+- The ball collects a key when the ball centre comes within 0.35 cell of the
+  key centre, as in the original. The test runs every step in `Playing`, so
+  a key collects in the middle of a roll or a jump. A collected key
+  disappears and plays the key sound. The last key of the level plays the
+  last-key sound in its place.
+- A forward jump passes too high over a key on the floor of the cell it
+  jumps over, so that key stays. See `SPEC.md`, Items.
 - The exit is a block. It is open when the ball has collected every key.
   An open exit draws brighter than a closed one.
-- When the ball enters the cell above the open exit of level 1 or 2, the
-  phase changes to `Cleared`. The next level starts. See Levels and Themes.
-- When the ball enters the cell above the open exit of level 3, the phase
-  changes to `Won`. The ball finishes its move and stops. The ball changes
+- The ball reaches the open exit when its centre passes into the exit's
+  cell, half way through the roll, or when it lands on the exit. See Level
+  end.
+- After the level end of level 1 or 2, a press starts the next level. See
+  Levels and Themes.
+- After the level end of level 3, a press changes the phase to `Won`. The
+  ball shows again on the exit, and the HUD comes back. The ball changes
   colour.
-- In `Won`, every input except Escape does nothing.
+- In `Won`, Enter or the pad's South starts a fresh game on level 1. Every
+  other input except Escape does nothing. See Level end.
 - A closed exit does nothing. The ball can roll over it.
-- A panel at the top-left shows the keys collected out of the level's
-  total, such as `Keys 1 / 2`. It shows in every phase.
+- A panel at the bottom left shows the keys collected out of the level's
+  total, such as `Keys 1 / 2`. It hides with the rest of the HUD in `Ending`
+  and `Cleared`.
+
+## Level end
+
+Kula copies the original's level end. See `SPEC.md`, Level end.
+
+1. The ball reaches the open exit. The phase changes to `Exiting`. Input
+   does nothing and Up no longer rolls the ball, so a roll stops at the
+   exit's centre.
+2. After a roll, the level plays on for 0.1 s: the clock runs and the ball
+   collects. After a landing, the level ends in the next step.
+3. The level ends. The phase changes to `Ending`, and the level score goes
+   to the total score.
+4. The ball and the HUD hide. The camera turns about the level and swings
+   in and out.
+5. `WELL DONE` fades in at the top centre over 1.7 s. Below the middle,
+   `Level n` and `Score n` count up by 5000 a second, from 0 and from the
+   old total.
+6. When both finish, `Press Space` shows. Press Space or the pad's South
+   to go on. A press before they finish only finishes them.
+7. The next level starts. After level 3, the phase changes to `Won`.
+8. In `Won`, `Press Enter to play again` shows above the middle. Enter or
+   the pad's South starts a fresh game on level 1. The total and level
+   score go to 0, the fruit set empties, and the clock and the keys reset.
+   This is an addition: the original goes on to the next level of the world.
+
+## Coins
+
+- A coin is a bronze disc on one face of a block. It spins and bobs like a
+  key, 20 units (0.04 cell) higher.
+- The ball collects a coin when the ball centre comes within 0.37 cell of
+  the coin centre. The coin adds 250 to the level score and plays a chime.
+- A forward jump collects a coin on the floor of the cell it jumps over only
+  when the coin is near the top of its bob. See `SPEC.md`, Items.
+- A fall brings back every coin of the level.
+
+## Fruit
+
+Kula copies the original's five fruits: apple, watermelon, pumpkin, banana
+and strawberry. See `SPEC.md`, Items.
+
+- A level entry `fruit` shows the first fruit not yet collected, in that
+  order. A new game shows an apple on the first level with a fruit, then a
+  watermelon, then a pumpkin.
+- A fruit spins slowly, tilts and bobs. The ball collects it when the ball
+  centre comes within 0.40 cell of the fruit centre. The fruit adds 2500
+  to the level score and plays a jingle.
+- The exit keeps the fruit collected. A fall loses the fruit collected
+  since the last exit.
+- A panel at the bottom right shows the fruit collected out of five, such
+  as `Fruit 1 / 5`.
+- Kula has no bonus level, so five fruits do nothing more.
+
+## Score
+
+Kula copies the original's two scores. See `SPEC.md`, Score.
+
+- The level score holds the points of the current try at the level. A key
+  adds 1000, a coin 250 and a fruit 2500.
+- The level end adds the level score to the total score and sets the level
+  score to 0.
+- A fall takes the level score and a penalty off the total score. The
+  penalty is 50 times the level number, at most 5000.
+- The total score does not go below 0. Kula has no game over and no lives.
+- A panel at the bottom shows `Level n` over `Score n`, 30% of the way
+  across the window, where the original draws its scores.
+
+## Level clock
+
+Kula copies the original's level clock. See `SPEC.md`, Level clock.
+
+- Each level starts with the time of its `time n` line, or 99 s without one.
+- The clock counts whole steps down. It runs only in `Playing` and
+  `Exiting`, so it stops when the level ends and in the `Starting` pause.
+- At 0 the level restarts, the same as a fall, and the fall's penalty comes
+  off the total score.
+- A restart sets the clock back to the start time.
+- A panel at the top centre shows `Time n` for the whole level. This is a
+  change from the original, which shows only an hourglass above 50 s. At the
+  level start the panel reads the start time, `Time 99` on Hiro levels 1 to 3.
+- Above 50 s the text is white. From 50 s it dims to grey, darkest at 25 s,
+  then goes back to white by the last second. This is also a change from the
+  original, which turns the text black at 50 s and fades it in. As in the
+  original, `n` is 1 more than the whole seconds left, so the panel reads
+  `Time 1` in the last second.
+- In the last 20 s, a tick plays each time `n` drops, louder each time.
 
 ## Levels and Themes
 
 `Theme.roc` holds one Theme for each level:
 
-| Level | File | Theme |
-|---|---|---|
-| 1 | `levels/level1.txt` | `haze` |
-| 2 | `levels/level2.txt` | `inca` |
-| 3 | `levels/level3.txt` | `arctic` |
+| Level | File | Original | Theme |
+|---|---|---|---|
+| 1 | `levels/level1.txt` | Hiro level 1 | `hiro` |
+| 2 | `levels/level2.txt` | Hiro level 2 | `hiro` |
+| 3 | `levels/level3.txt` | Hiro level 3 | `hiro` |
+
+The original has one look for each world, so all three levels use one
+Theme. No level uses the `haze`, `inca` and `arctic` Themes yet. They wait for
+levels from other worlds.
+
+The `hiro` Theme copies the look of the original's Hiro world. Its sky has
+a white zenith, blue sky with soft clouds, pyramids on the horizon and
+orange sand below. The pyramids are an addition: the original paints them
+flat into its sky, and Kula renders them as 3D pyramids that the Theme sun
+lights. Its face is sandstone with a carved border. The sun
+comes from +z, so faces that look along +z are bright and warm, and faces
+that look along -z are dark. The colours are numbers from the original's
+`HIRO.TGI`; Kula's scripts make every pixel. See SPEC.md, Look.
 
 Each Theme is also a pack name. The pack of Theme `<theme>` holds
 `<theme>_face` and `sky/<theme>`. The face texture
@@ -197,13 +322,21 @@ carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
-   The `kula` pack holds `ball` and `sound/bounce`, which every level uses.
+   The `kula` pack holds `ball`, `coin`, `apple`, `watermelon`, `pumpkin`,
+   `key`, `sound/bounce`, `sound/chime`, `sound/tick`, `sound/jingle`,
+   `sound/key` and `sound/last_key`, which every level uses.
    It never unloads.
-2. When the ball clears a level before the last, Kula sends Load for the
-   next level's Theme.
+2. When the press after the level end of a level before the last changes
+   the phase to `Cleared`, Kula sends Load for the next level's Theme.
 3. When the host calls `loaded` for that pack, Kula takes its mesh ids and
    starts the next level. The ball stays still for 1 s, the `Starting` phase.
 4. The next step sends Unload for the old Theme.
+
+If the next level has the same Theme, Kula sends no Load and no Unload,
+because the host ignores a Load for a pack that is already loaded. The
+step after the press starts the next level with the Theme's ids, and the
+`Starting` pause follows. Levels 1 to 3 take this path. A fresh game from
+`Won` also keeps the `hiro` Theme, so it sends no Load and no Unload.
 
 A fall restarts the level the ball is on, not level 1.
 
@@ -225,80 +358,160 @@ layer first. A blank line separates two layers.
 | `K` | A block with a key on top |
 | `E` | The exit block |
 
-A level needs exactly one `S`. A level that does not parse stops the game
-with the parse error when that level starts.
+A line with a space is an entry. An entry puts an item or the start on any
+face of a block. Entries come after the last layer, one on each line:
+
+| Entry | Meaning |
+|---|---|
+| `x y z face item` | Item `key`, `coin`, `fruit` or `exit` on face `face` of the block at `x y z` |
+| `start x y z face forward` | The ball starts on face `face` of the block at `x y z`, facing `forward` |
+| `time n` | The level clock starts at `n` seconds, 1 or more. At most one line. Without it, the clock starts at 99 s |
+
+A face or a forward is `+x`, `-x`, `+y`, `-y`, `+z` or `-z`. The forward
+must be at right angles to the face. The block must be in the grid. `K` and
+`E` are shortcuts for an entry on the `+y` face. `S` is a shortcut for
+`start x y z +y -z`.
+
+A level needs exactly one start, from `S` or from an entry. A level that
+does not parse stops the game with the parse error when that level starts.
+
+### Convert a level from the original
+
+`scripts/convert_level.py` reads a Hiro level of Roll Away, the USA
+release, from your own disc image and writes it in this format. It needs
+only Python 3. The image must be one MODE2/2352 track (`.bin`). Kula does
+not ship any disc data.
+
+```sh
+python3 scripts/convert_level.py DISC.bin 1 --list
+python3 scripts/convert_level.py DISC.bin 1 -o levels/level1.txt
+```
+
+`--list` prints every block type, record type and object of the level, with
+counts. Without `--list`, the script stops if the level uses a feature that
+Kula cannot show, and it names each one. The script turns the original
+`(x, y, z)` to Kula's `(x, -z, y)`. The original's `-z` is the up of the
+Hiro start face, so it becomes Kula's `+y`. The turn keeps right-handed
+axes, so the level is not mirrored. The script moves the lowest block to 0
+on each axis. If the level's start time is not 99 s, the script writes a
+`time n` line.
+
+The script writes `coin` for a bronze coin. It stops on a gold or a silver
+coin. It writes `fruit` for any fruit, because the game shows the first
+fruit not yet collected, whatever fruit the level stores.
+
+`python3 -m unittest discover -s scripts` tests the script on a synthetic
+disc image.
 
 ### Example: level1
 
-`levels/level1.txt` is one column wide. It has two layers:
+`levels/level1.txt` is Hiro level 1. It has one layer, a ring of 4 × 7
+blocks round two holes:
 
 ```text
-E        .
-#        .
-#        .
-.        .
-#        .
-#        K
-#        #
-K        .
-#        .
-S        .
+####
+#..#
+#..#
+####
+#..#
+#..#
+####
+
+0 0 4 +y coin
+3 0 1 +y coin
+0 0 0 +y exit
+3 0 6 +y fruit
+3 0 3 +y key
+start 0 0 6 +y -z
 ```
 
-The left column is layer 0 and the right column is layer 1. In the file,
-layer 1 comes after layer 0 and a blank line. The route:
+The route that collects every item:
 
-1. Roll from `S` along `-z` over the first key.
-2. Climb the wall of layer 1 and roll onto its top.
-3. Collect the second key. Roll over the far edge onto the side of the
-   block.
-4. Climb back onto layer 0.
-5. Jump the gap.
-6. Roll on to the exit.
+1. Roll from the start along `-z` over the first coin to the middle row.
+2. Turn right and roll along the middle row to the key.
+3. Turn right and roll to the fruit.
+4. Turn about and roll along the right column, over the second coin, to
+   the far row.
+5. Turn left and roll to the exit.
 
 ## Meshes and skies
 
 The blocks draw as faces, not as whole cubes. The camera can then sit inside
-a block, as in the original, and still see the ball. Keys are primitive
-cubes.
+a block, as in the original, and still see the ball. A banana and a
+strawberry are tinted primitive spheres, because Kula's levels never show
+them.
 
 | File | What it is |
 |---|---|
 | `assets/meshes/<theme>_face.glb` | A 1 × 1 quad facing +y, one-sided, with the Theme's texture |
 | `assets/meshes/ball.glb` | A sphere of diameter 1 with eight white and red wedges |
-| `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky |
+| `assets/meshes/key.glb` | A gold key 0.24 wide, 0.06 thick and 0.57 tall: a hexagonal shaft, one tooth at the bottom and a faceted diamond bow on top. It stands up along +y, with its faces along ±z |
+| `assets/meshes/coin.glb` | A bronze disc 0.4 wide, with a raised rim and a bevelled edge. Metallic 0.4, so the flat face stays bronze with no environment map. It stands on its edge, with its faces along ±z |
+| `assets/meshes/apple.glb` | A red apple 0.39 wide with a stem and a leaf |
+| `assets/meshes/watermelon.glb` | A striped watermelon 0.48 long, lying along ±z |
+| `assets/meshes/pumpkin.glb` | A ribbed orange pumpkin 0.44 wide with a stem |
+| `assets/sky/<theme>/` | Six PNG cube faces of the Theme's sky, 512 texels square for `hiro` and 256 for the others |
 
 `assets/source/make_meshes.py` builds the meshes and their textures.
-`assets/source/make_skies.py` renders the skies. Each Theme in a script
-uses the same name and sun direction as in `Theme.roc`. Run both with
-Blender from this directory:
+`assets/source/make_skies.py` makes the skies. It paints the `hiro` sky
+texel by texel and renders the others with Blender's sky texture. On the
+`hiro` sky it lays pyramids that Cycles renders: a Giza-like group of three
+large pyramids and four small ones in front of the start view, and a lone one
+behind it. The Theme sun lights them, haze softens the far ones, and each base
+fades into the sand. Each Theme in a script uses the same name and sun
+direction as in `Theme.roc`. Run both with Blender from this directory:
 
 ```sh
 /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_meshes.py
 /Applications/Blender.app/Contents/MacOS/Blender --background --python assets/source/make_skies.py
 ```
 
-Commit the scripts and their outputs. The build does not run Blender.
+Names after `--` build only those meshes or skies, for example `-- coin`
+or `-- hiro`. A second run of `make_skies.py` writes the same files on the
+same machine and Blender version: Cycles renders the pyramids on the CPU with
+a fixed seed and sample count. Another machine or Blender version can change
+some pyramid pixels. Each fruit mesh has one material and one base colour
+texture, as the engine allows. Its origin is the fruit's centre. Commit the scripts and their
+outputs. The build does not run Blender.
 
 ## Sound
 
-The ball bounces with a short thud when it lands from a forward jump or
-from a fall onto a block. A jump in place, a roll and a fall off the level
-make no sound. As in the original, the ball is silent when the player has
-no control, so a landing in `Cleared` or `Won` makes no sound. Kula has no
-transporters yet; a landing after one must stay silent too.
+The ball bounces with a short thud when it lands on a block: from a
+forward jump, a jump in place, a fall or a bounce. It thuds too when a jump
+hits a wall or a ceiling, so a blocked jump thuds twice. A roll and a fall
+off the level make no sound. As in the original, a landing is silent when
+the player has no control, so a landing after the level end or in `Won`
+makes no sound. A hit thuds in every phase but `Ending` and `Cleared`,
+where the ball hides. Kula has no transporters yet; a landing after one must
+stay silent too.
 
 `step` returns `Sound.play` with the bounce's Sound id in the step the ball
-lands. `Ball.landed` decides the landing.
+lands and in the step it hits. `Ball.landed` and `Ball.hit` decide them. It
+returns one `Sound.play` with the chime's Sound id for each coin the step
+collects, and one with the jingle's Sound id for each fruit. Each key plays
+the key sound. The key that leaves no keys plays the last-key sound alone, as
+in the original.
+
+In the last 20 s of the level clock, `step` returns a `Play` of the tick
+with a gain that rises as the time runs out. See Level clock.
 
 | File | What it is |
 |---|---|
 | `assets/sound/bounce.wav` | The bounce, 0.2 s of 16-bit mono at 48 kHz |
+| `assets/sound/chime.wav` | The coin chime, 0.35 s: two bright notes a fifth apart |
+| `assets/sound/tick.wav` | The clock tick, 0.06 s of 16-bit mono at 48 kHz |
+| `assets/sound/jingle.wav` | The fruit jingle, 0.6 s: four soft notes up a major chord |
+| `assets/sound/key.wav` | The key sound, 0.4 s: a bright zing that glides up an octave |
+| `assets/sound/last_key.wav` | The last-key sound, 1.2 s: the key's zing, then a held major chord |
 
-`assets/source/make_sounds.py` synthesizes it with the Python standard
-library. It does not copy the original's sound. Run it from this directory
+`assets/source/make_sounds.py` synthesizes them with the Python standard
+library. It does not copy the original's sounds. Run it from this directory
 and commit its output:
 
 ```sh
 python3 assets/source/make_sounds.py
 ```
+
+## Credits
+
+Level layouts from Roll Away / Kula World (Game Design Sweden, 1998).

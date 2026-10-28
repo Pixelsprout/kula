@@ -90,3 +90,13 @@ jobs:
             echo "FAIL: kula exit=$code, expected one 'Frame Count: 30' line" >&2
             exit 1
           fi
+
+  # The level converter needs only Python. Its tests use a synthetic disc image.
+  scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test the level converter
+        run: python3 -m unittest discover -s scripts -v

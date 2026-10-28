@@ -19,6 +19,9 @@ FRAME_STEPS = 4  # 120 steps a second / 4 = 30 fps
 BALL_ID = 0
 DEFAULT_PRESS = 1
 DEFAULT_SETTLE = 47
+# A host screenshot is about 8 MB, so a long route can fill the disk. Each
+# frame shrinks to the video's width as soon as it is saved.
+FRAME_WIDTH = 1280
 
 
 class BridgeError(Exception):
@@ -120,11 +123,16 @@ class Recorder:
             first = False
             steps -= n
             if record:
-                self.bridge.request({"op": "screenshot", "path": os.path.join(self.frames_dir, f"f{self.frame:05d}.png")})
-                self.frame += 1
+                self.save_frame()
             if "Quit" in reply.get("commands", []):
                 break
         return commands
+
+    def save_frame(self):
+        path = os.path.join(self.frames_dir, f"f{self.frame:05d}.png")
+        self.bridge.request({"op": "screenshot", "path": path})
+        shrink(path)
+        self.frame += 1
 
     def move(self, move):
         record = move.get("record", True)
@@ -140,9 +148,13 @@ def summary(commands):
     return "; ".join(names)
 
 
+def shrink(path):
+    small = path[:-len(".png")] + ".small.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-vf", f"scale={FRAME_WIDTH}:-2", small], check=True)
+    os.replace(small, path)
+
+
 def encode(frames_dir, out):
-    if not shutil.which("ffmpeg"):
-        raise BridgeError("ffmpeg is not on PATH")
     subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-framerate", str(120 // FRAME_STEPS), "-i", os.path.join(frames_dir, "f%05d.png"),
          "-vf", "scale=1280:720", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-movflags", "+faststart", out],
@@ -159,6 +171,8 @@ def main(argv):
                         help="the Kula checkout to run (default: the repo that holds this script)")
     args = parser.parse_args(argv)
 
+    if not shutil.which("ffmpeg"):
+        raise BridgeError("ffmpeg is not on PATH")
     with open(args.route) as f:
         route = json.load(f)
     moves = route["moves"]

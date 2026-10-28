@@ -1,3 +1,4 @@
+import linalg.Vec3
 import World
 
 Grid := [].{
@@ -26,6 +27,10 @@ Grid := [].{
 	to_vec3 : World.Cell -> { x : F32, y : F32, z : F32 }
 	to_vec3 = |c| { x: c.x.to_f32(), y: c.y.to_f32(), z: c.z.to_f32() }
 
+	# The point height cells out along up from the face under cell, the face of the block at cell - up.
+	over_face : World.Cell, World.Cell, F32 -> Vec3.Vec3
+	over_face = |cell, up, height| Vec3.add(to_vec3(cell), Vec3.scale(to_vec3(up), height - 0.5))
+
 	has_block : Set(World.Cell), World.Cell -> Bool
 	has_block = |blocks, cell| blocks.contains(cell)
 }
@@ -39,5 +44,6 @@ expect Grid.cross({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: -1 }) == { x: -1, y: 0,
 expect Grid.dot({ x: 1, y: -2, z: 3 }, { x: 0, y: 1, z: 0 }) == -2
 expect Grid.scale({ x: 0, y: 0, z: -1 }, 2) == { x: 0, y: 0, z: -2 }
 expect Grid.to_vec3({ x: 1, y: -2, z: 3 }) == { x: 1.0, y: -2.0, z: 3.0 }
+expect Grid.over_face({ x: 1, y: 2, z: 3 }, { x: -1, y: 0, z: 0 }, 0.25) == { x: 1.25, y: 2.0, z: 3.0 }
 expect Grid.has_block(Set.from_list([{ x: 1, y: 0, z: 2 }]), { x: 1, y: 0, z: 2 })
 expect !Grid.has_block(Set.from_list([{ x: 1, y: 0, z: 2 }]), { x: 1, y: 1, z: 2 })

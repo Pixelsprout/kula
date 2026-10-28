@@ -1,12 +1,15 @@
-app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/linalg-C1juJZYY4R86QntuhBGakmnPKb77MpBxngEYNg2976wK.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/mesh-5kHC5kD57HyJDDYnvD3g3GLMoep5Jchc67kv8kUdcrYD.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/platform-CdUrA58dQQFQLxKFBNEc9vtFP652ZwvQ5Tb59GYDCrUQ.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.4.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst" }
+app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/mesh-5Fmg6uFHADmSBmZxNWDg25VStK6mU7YqhkWEXHjMEGNP.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/platform-2gvPTPztQ7D8yQsMvRTD4rBKS8VmSwMCPZ432eWzNNtJ.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst" }
 
-import linalg.Quat
 import linalg.Vec3
-import pf.Vocabulary exposing [Command, Config, Draw, Input, Manifest, Rgb, Scene]
+import pf.Vocabulary exposing [Command, Config, Manifest, Rgb]
+import pf.Button
+import pf.Draw
+import pf.Input
 import pf.Key
 import pf.Launch
 import pf.Light
 import pf.QueryResults
+import pf.Scene
 import pf.Sound
 import World
 import Grid
@@ -15,25 +18,28 @@ import Rules
 import View
 import Theme
 import Hud
+import Pickup
+import Flash
+import Level
+import Clock
+import Fruit
+import Sounds
+import Ending
 
 Model : Rules.Model
 
 launch : Config -> Vocabulary.Launch
-launch = |_config| Launch.default
+launch = |_config| { ..Launch.default, step_hz: Clock.step_hz }
 
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.append(bounce_sound) }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat(Sounds.assets) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
 kula_pack : Str
 kula_pack = "kula"
-
-# assets/source/make_sounds.py writes it.
-bounce_sound : Str
-bounce_sound = "sound/bounce"
 
 load_theme : U64 -> Command
 load_theme = |level_number| {
@@ -47,85 +53,150 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), bounce: Sound.resolve(manifest, bounce_sound) }
-	} else if model.phase == Cleared and pack == next_theme.pack {
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), sounds: Sounds.resolve(manifest) }
+	} else if Rules.cleared(model.phase) and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
-	} else if model.phase != Cleared and pack == current.pack {
+	} else if !Rules.cleared(model.phase) and pack == current.pack {
 		{ ..model, meshes: View.theme_meshes(model.meshes, manifest, current.face, current.sky) }
 	} else {
 		model
 	}
 }
 
-step : Model, Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
+step : Model, Vocabulary.Input, Vocabulary.QueryResults, F32 -> { model : Model, commands : List(Command) }
 step = |model, input, _results, dt| {
-	stages = [Rules.count_down(dt), read_input(input), move_ball(input, dt), Rules.collect, Rules.exit, Rules.fall]
+	controls = read_controls(input)
+	# play_again runs before run_ending, so the South press that reaches Won does not also start a fresh game.
+	stages = [start_same_theme, Rules.play_again(controls.play_again), Rules.count_down(dt), Rules.run_ending(controls.jump, dt), Rules.run_clock, read_input(controls), move_ball(controls, dt), Rules.move_pickups(dt), Rules.fade_flashes(dt), Rules.collect, Rules.exit, Rules.fall]
 	after = stages.fold(model, |m, stage| stage(m))
-	quit = if Key.pressed(input, Escape) {
+	quit = if controls.quit {
 		[Quit]
 	} else {
 		[]
 	}
-	load = if model.phase != Cleared and after.phase == Cleared {
+	load = if !Rules.cleared(model.phase) and Rules.cleared(after.phase) and !keeps_theme(after.level_number) {
 		[load_theme(after.level_number + 1)]
 	} else {
 		[]
 	}
 	unloads = model.unloads.map(|pack| Unload(pack))
-	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)) }
+	{ model: { ..after, unloads: [] }, commands: quit.concat(load).concat(unloads).concat(bounce(model, after)).concat(pickup_sounds(model, after)).concat(tick(model, after)) }
 }
 
-# As in the original, the ball bounces only while the player has control, which Kula has only in Playing.
-bounce : Model, Model -> List(Command)
-bounce = |before, after|
-	if before.phase == Playing and Ball.landed(before.ball, after.ball) {
-		[Sound.play(after.bounce)]
+# The host ignores a Load for a pack that is already loaded, and no loaded
+# would come. So a level whose next level keeps its Theme sends no Load.
+keeps_theme : U64 -> Bool
+keeps_theme = |level_number| Theme.of_level(level_number + 1).pack == Theme.of_level(level_number).pack
+
+# In the step after such a level is Cleared, the next level starts with the Theme's ids.
+start_same_theme : Model -> Model
+start_same_theme = |model|
+	if Rules.cleared(model.phase) and keeps_theme(model.level_number) {
+		Rules.next_level(model)
 	} else {
-		[]
+		model
 	}
 
-# Input is read before the ball moves. Ball.act ignores a key that cannot act on the current move.
-read_input : Input -> (Model -> Model)
-read_input = |input| |model| match (model.phase, action(input)) {
+# Each item the step collected plays its kind's sound. The keys count down
+# in the order of the pickups, so only the key that leaves none is the last key.
+# In a step, only a pickup takes an item out of the pickups: a restart puts
+# them all back. A new level has its own pickups, and no pickup happens in its first step.
+pickup_sounds : Model, Model -> List(Command)
+pickup_sounds = |before, after| before.pickups
+	.keep_if(|pickup| before.level_number == after.level_number and !after.pickups.any(|left| left.id == pickup.id))
+	.fold(
+		{ keys_left: before.keys_left, commands: [] },
+		|so_far, pickup| {
+			keys_left = if pickup.kind == Key so_far.keys_left - 1 else so_far.keys_left
+			{ keys_left, commands: so_far.commands.concat(Pickup.sounds(pickup.kind, after.sounds, keys_left).map(Sound.play)) }
+		},
+	)
+	.commands
+
+# As in the original, a landing bounces only while the player has control,
+# which Kula has only in Playing. A wall or ceiling hit bounces in any phase
+# but the level end, where the ball hides.
+bounce : Model, Model -> List(Command)
+bounce = |before, after| {
+	shown = !Rules.ended(before.phase) and !Rules.ended(after.phase)
+	hit = shown and before.level_number == after.level_number and Ball.hit(before.ball, after.ball)
+	landed = before.phase == Playing and Ball.landed(before.ball, after.ball)
+	[hit, landed].keep_if(|plays| plays).map(|_| Sound.play(after.sounds.bounce))
+}
+
+tick : Model, Model -> List(Command)
+tick = |before, after| match Clock.tick(before.clock, after.clock) {
+	Ok(gain) => [Play({ sound: after.sounds.tick, gain, pitch: 1.0, at: Here })]
+	Err(NoTick) => []
+}
+
+# forward is held; the others are pressed in this step.
+Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, play_again : Bool, quit : Bool }
+
+# The keys and every connected pad drive the one ball.
+read_controls : Vocabulary.Input -> Controls
+read_controls = |input| {
+	forward: Key.held(input, Up) or Button.held_any(input, DpadUp) or input.gamepads.any(|pad| pad.left_stick.y > stick_forward),
+	jump: Key.pressed(input, Space) or Button.pressed_any(input, South),
+	left: Key.pressed(input, Left) or Button.pressed_any(input, DpadLeft),
+	right: Key.pressed(input, Right) or Button.pressed_any(input, DpadRight),
+	play_again: Key.pressed(input, Enter) or Button.pressed_any(input, South),
+	quit: Key.pressed(input, Escape) or Button.pressed_any(input, Start),
+}
+
+# The stick must pass half its travel, so a light touch does not roll the ball.
+stick_forward : F32
+stick_forward = 0.5
+
+# Input is read before the ball moves. Ball.act ignores a control that cannot act on the current move.
+read_input : Controls -> (Model -> Model)
+read_input = |controls| |model| match (model.phase, action(controls)) {
 	(Playing, Ok(act)) => { ..model, ball: Ball.act(model.level.blocks, model.ball, act) }
 	_ => model
 }
 
-move_ball : Input, F32 -> (Model -> Model)
-move_ball = |input, dt| |model|
-	if Key.held(input, Up) {
-		{ ..model, ball: Ball.advance_up_held(model.level.blocks, model.ball, dt) }
+# As in the original, held Up rolls on only in Playing, so a roll onto the exit
+# stops at the cell centre. A landing on the open exit ends the level in the next
+# step, so held Up does not roll the ball off it.
+move_ball : Controls, F32 -> (Model -> Model)
+move_ball = |controls, dt| |model|
+	if controls.forward and model.phase == Playing {
+		{ ..model, ball: Ball.advance_up_held(model.level.blocks, model.ball, dt, |pose| Rules.open_exit_at(model, pose)) }
 	} else {
 		{ ..model, ball: Ball.advance(model.ball, dt) }
 	}
 
-# Tank controls. Up rolls while held; the others act on press only. Space with Up
-# held is a forward jump.
-action : Input -> Try(Ball.Action, [NoAction])
-action = |input|
-	if Key.pressed(input, Space) {
-		Ok(Jump({ up_held: Key.held(input, Up) }))
-	} else if Key.pressed(input, Left) {
+# Tank controls. Forward rolls while held; the others act on press only. A jump
+# with forward held is a forward jump.
+action : Controls -> Try(Ball.Action, [NoAction])
+action = |controls|
+	if controls.jump {
+		Ok(Jump({ up_held: controls.forward }))
+	} else if controls.left {
 		Ok(TurnLeft)
-	} else if Key.pressed(input, Right) {
+	} else if controls.right {
 		Ok(TurnRight)
-	} else if Key.held(input, Up) {
+	} else if controls.forward {
 		Ok(Roll)
 	} else {
 		Err(NoAction)
 	}
 
-view : Model -> Scene
+view : Model -> Vocabulary.Scene
 view = |model| {
 	theme = Theme.of_level(model.level_number)
-	exits = model.level.items.keep_if(|entry| entry.item == Exit).map(|entry| below(entry.cell))
+	exits = model.level.items.keep_if(|entry| entry.item == Exit).map(|entry| Grid.sub(entry.cell, entry.up))
 	exit_tint = if Rules.exit_open(model) {
 		open_exit_tint
 	} else {
 		closed_exit_tint
 	}
-	camera = View.camera(model.ball)
+	ending = Rules.ending(model.phase)
+	camera = match ending {
+		Ok(sequence) => View.orbit(model.level.blocks, sequence.seconds)
+		Err(NotEnded) => View.camera(model.ball)
+	}
 	# Ids come before the near-plane filter, so a face keeps its id while others drop out.
 	blocks = View.faces(model.level.blocks)
 		.map_with_index(|face, i| { face, id: 1 + i.to_u64() })
@@ -140,24 +211,25 @@ view = |model| {
 				View.face_draw(entry.id, model.meshes.face, entry.face, tint)
 			},
 		)
-	# Ids come before the collected filter too, so a key keeps its id.
-	keys = model.level.items
-		.keep_if(|entry| entry.item == Key)
-		.map_with_index(|entry, i| { cell: entry.cell, id: key_ids + i.to_u64() })
-		.keep_if(|key| !model.collected.contains(key.cell))
-		.map(|key| cube(model.meshes, key.id, key.cell, 0.3, key_tint))
+	pickups = model.pickups.map(|pickup| pickup_draw(model.meshes, pickup))
 	ball_tint = if model.phase == Won {
 		won_ball_tint
 	} else {
 		playing_ball_tint
 	}
-	ball = View.ball_draw(model.ball, model.meshes.ball, ball_tint)
-	{ camera, draws: blocks.concat(keys).append(ball), colliders: [], lights: theme.lights, cursor: Free, sky: model.meshes.sky, ui: Hud.ui(model), queries: [], loops: [] }
+	# As in the original, the ball hides once the level ends.
+	ball = match ending {
+		Ok(_) => []
+		Err(NotEnded) => [View.ball_draw(model.ball, model.meshes.ball, ball_tint)]
+	}
+	lights = theme.lights.concat(Flash.lights(model.flashes, theme.lights)).map(|light| Light(light))
+	draws = blocks.concat(pickups).concat(ball).map(|draw| Draw(draw))
+	{ ..Scene.empty, camera, nodes: lights.concat(draws), sky: model.meshes.sky, ui: Hud.ui(model) }
 }
 
-# Face draw ids count up from 1, so the key ids start well past any level's faces.
-key_ids : U64
-key_ids = 100_000
+# Face draw ids count up from 1, so the pickup ids start well past any level's faces.
+pickup_ids : U64
+pickup_ids = 100_000
 
 closed_exit_tint : Rgb
 closed_exit_tint = { r: 0.6, g: 0.15, b: 0.15 }
@@ -169,9 +241,6 @@ open_exit_tint = { r: 1.0, g: 0.35, b: 0.3 }
 face_tint : Rgb
 face_tint = { r: 1.0, g: 1.0, b: 1.0 }
 
-key_tint : Rgb
-key_tint = { r: 1.0, g: 0.787, b: 0.033 }
-
 # ball.glb carries its own colours.
 playing_ball_tint : Rgb
 playing_ball_tint = { r: 1.0, g: 1.0, b: 1.0 }
@@ -179,78 +248,165 @@ playing_ball_tint = { r: 1.0, g: 1.0, b: 1.0 }
 won_ball_tint : Rgb
 won_ball_tint = { r: 1.0, g: 0.85, b: 0.2 }
 
-below : World.Cell -> World.Cell
-below = |cell| { ..cell, y: cell.y - 1 }
+pickup_draw : World.Meshes, Pickup.Pickup -> Vocabulary.Draw
+pickup_draw = |meshes, pickup| {
+	shape = Pickup.shape(pickup.kind, meshes)
+	{ ..Draw.default, id: pickup_ids + pickup.id, mesh: shape.mesh, pos: Pickup.centre(pickup), rot: Pickup.rot(pickup), scale: Vec3.scale(Vec3.one, shape.size), tint: shape.tint }
+}
 
-cube : World.Meshes, U64, World.Cell, F32, Rgb -> Draw
-cube = |meshes, id, cell, size, tint| { id, mesh: meshes.cube, pos: Grid.to_vec3(cell), scale: Vec3.scale(Vec3.one, size), rot: Quat.identity, scale_rot: Quat.identity, tint }
+manifest : List((Str, U32)) -> Manifest
+manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: [] })
 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "haze_face", "sky/haze", "sound/bounce"] }).model
-	loaded(loaded(booted, "kula", [{ name: "ball", id: 4 }, { name: "sound/bounce", id: bounce_id }]), "haze", [{ name: "haze_face", id: 5 }, { name: "sky/haze", id: 1 }])
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "hiro_face", "sky/hiro", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }).model
+	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("key", 10), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id), ("sound/key", key_sound_id), ("sound/last_key", last_key_id)])
+	loaded(loaded(booted, "kula", kula), "hiro", manifest([("hiro_face", 5), ("sky/hiro", 1)]))
 }
 
 bounce_id : U32
 bounce_id = 65537
 
-idle : Input
-idle = { held: [], pressed: [], mouse: { dx: 0.0, dy: 0.0 } }
+chime_id : U32
+chime_id = 65538
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "sound/bounce"] }), Load({ pack: "haze", assets: ["haze_face", "sky/haze"] })]
-expect init({ seed: 0, args: [], assets: [] }).model.meshes == { cube: 1, face: 0, ball: 0, sky: 0 }
-expect init({ seed: 0, args: [], assets: [] }).model.bounce == 0 and started.bounce == bounce_id
-expect started.meshes == { cube: 1, face: 5, ball: 4, sky: 1 }
+tick_id : U32
+tick_id = 65539
+
+jingle_id : U32
+jingle_id = 65540
+
+key_sound_id : U32
+key_sound_id = 65541
+
+last_key_id : U32
+last_key_id = 65542
+
+idle : Vocabulary.Input
+idle = Input.empty
+
+key_draws : Model -> List(Vocabulary.Draw)
+key_draws = |model| draws_in(view(model)).keep_if(|d| d.mesh == model.meshes.key)
+
+draws_in : Vocabulary.Scene -> List(Vocabulary.Draw)
+draws_in = |scene| scene.nodes.join_map(
+	|node| match node {
+		Draw(draw) => [draw]
+		_ => []
+	},
+)
+
+lights_in : Vocabulary.Scene -> List(Vocabulary.Light)
+lights_in = |scene| scene.nodes.join_map(
+	|node| match node {
+		Light(light) => [light]
+		_ => []
+	},
+)
+
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }), Load({ pack: "hiro", assets: ["hiro_face", "sky/hiro"] })]
+expect init({ seed: 0, args: [], assets: [] }).model.meshes == { sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, key: 0, sky: 0 }
+expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { ..Sounds.none, bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
+expect started.meshes == { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
 
-up_held : Input
+up_held : Vocabulary.Input
 up_held = { ..idle, held: [Key.code(Up)] }
 
 expect step(started, up_held, QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
 expect step(started, { ..idle, pressed: [Key.code(Left)] }, QueryResults.empty, 0.16).model.ball.turn == Turning({ from: started.level.start, t: 0.5, next: Stay })
 expect step(started, { ..idle, held: [Key.code(Left)] }, QueryResults.empty, 0.16).model.ball.turn == Steady
 
+# One column with a wall, a raised block and a gap, for the tests of moves
+# and drawing. A fall from it restarts level 1.
+column : Model
+column = {
+	level = Level.parse("E\n#\n#\n.\n#\n#\n#\nK\n#\nS\n\n.\n.\n.\n.\n.\nK\n#\n.\n.\n.\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level, Apple), keys_left: 2 }
+}
+
 expect {
-	model = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
+	model = [0.13, 0.13, 0.13, 0.13].fold(column, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
 	model.ball.pose.cell == { x: 0, y: 1, z: 7 }
 }
 expect step(started, { ..idle, pressed: [Key.code(Escape)] }, QueryResults.empty, 0.1).commands == [Quit]
 expect step(started, idle, QueryResults.empty, 0.1).commands == []
 
+with_pads : List(Vocabulary.Gamepad) -> Vocabulary.Input
+with_pads = |pads| { ..Input.empty, gamepads: pads }
+
+pad_holding : Button -> Vocabulary.Gamepad
+pad_holding = |button| { ..Input.idle_gamepad, held: [Button.code(button)] }
+
+pad_pressing : Button -> Vocabulary.Gamepad
+pad_pressing = |button| { ..Input.idle_gamepad, pressed: [Button.code(button)] }
+
+stick_at : F32 -> Vocabulary.Gamepad
+stick_at = |y| { ..Input.idle_gamepad, left_stick: { x: 0.0, y } }
+
+expect step(started, with_pads([pad_holding(DpadUp)]), QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
+expect step(started, with_pads([stick_at(0.6)]), QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
+expect step(started, with_pads([stick_at(0.5)]), QueryResults.empty, 0.13).model.ball.motion == Still
+
+# Any pad drives the ball, here the pad in slot 2.
+expect step(started, with_pads([Input.idle_gamepad, { ..pad_holding(DpadUp), slot: 2 }]), QueryResults.empty, 0.13).model.ball.motion == Rolling({ from: started.level.start, t: 0.5 })
+
+expect step(started, with_pads([pad_pressing(DpadLeft)]), QueryResults.empty, 0.16).model.ball.turn == Turning({ from: started.level.start, t: 0.5, next: Stay })
+expect step(started, with_pads([pad_holding(DpadLeft)]), QueryResults.empty, 0.16).model.ball.turn == Steady
+
 expect {
-	draws = view(started).draws
+	turned = step(started, with_pads([pad_pressing(DpadRight)]), QueryResults.empty, 0.32).model
+	turned.ball.pose.forward == { x: 1, y: 0, z: 0 }
+}
+
+expect step(started, with_pads([pad_pressing(South)]), QueryResults.empty, 0.27).model.ball.motion == JumpingInPlace({ t: 0.5 })
+expect step(started, with_pads([pad_pressing(Start)]), QueryResults.empty, 0.1).commands == [Quit]
+expect step(started, with_pads([Input.idle_gamepad]), QueryResults.empty, 0.1) == step(started, idle, QueryResults.empty, 0.1)
+
+expect {
+	draws = draws_in(view(column))
 	draws.len() == 49
 }
 
 expect {
-	draws = view(started).draws
+	draws = draws_in(view(column))
 	exit_faces = draws.keep_if(|d| d.tint == closed_exit_tint)
 	exit_faces.len() == 5 and exit_faces.all(|d| Vec3.length(d.pos) == 0.5)
 }
 
+# Each key draws key.glb unscaled and untinted, and bobs 120 to 160 units above its face.
 expect {
-	draws = view(started).draws
-	keys = draws.keep_if(|d| d.tint == key_tint)
-	keys.map(|d| d.pos) == [{ x: 0.0, y: 1.0, z: 7.0 }, { x: 0.0, y: 2.0, z: 5.0 }] and keys.all(|d| d.scale.x == 0.3)
+	keys = key_draws(column)
+	above = |d, face_y| d.pos.y - face_y >= 120.0 / 512.0 and d.pos.y - face_y <= 160.0 / 512.0
+	match keys {
+		[first, second] => first.pos.z == 7.0 and above(first, 0.5) and second.pos.z == 5.0 and above(second, 1.5) and keys.all(|d| d.pos.x == 0.0 and d.scale == Vec3.one and d.tint == { r: 1.0, g: 1.0, b: 1.0 })
+		_ => False
+	}
+}
+
+# A key moves between steps.
+expect {
+	later = step(column, idle, QueryResults.empty, 0.1).model
+	key_draws(later).map(|d| d.id) == key_draws(column).map(|d| d.id) and key_draws(later).map(|d| d.pos) != key_draws(column).map(|d| d.pos) and key_draws(later).map(|d| d.rot) != key_draws(column).map(|d| d.rot)
 }
 
 expect {
-	model = started
-	ball = view(model).draws.keep_if(|d| d.mesh == model.meshes.ball)
+	model = column
+	ball = draws_in(view(model)).keep_if(|d| d.mesh == model.meshes.ball)
 	ball.map(|d| d.pos) == [{ x: 0.0, y: 0.695, z: 9.0 }]
 }
 
 # In the climb at the level1 wall, the eye passes down through the old floor.
 # Only as it passes does that face drop out, and the rest keep their ids.
 expect {
-	rest = view(started).draws
-	at_wall = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
+	rest = draws_in(view(column))
+	at_wall = [0.13, 0.13, 0.13, 0.13].fold(column, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
 	faces_at = |dt| {
 		climbing = step(at_wall, up_held, QueryResults.empty, dt).model
-		view(climbing).draws.keep_if(|d| d.mesh == climbing.meshes.face)
+		draws_in(view(climbing)).keep_if(|d| d.mesh == climbing.meshes.face)
 	}
 	passing = faces_at(0.152)
 	faces_at(0.14).len() == 46 and passing.len() < 46 and passing.all(|d| rest.any(|r| r.id == d.id and r.pos == d.pos))
@@ -258,9 +414,46 @@ expect {
 
 # Rolling from S over the first key collects it.
 expect {
-	model = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
-	model.keys_left == 1 and model.collected.contains({ x: 0, y: 1, z: 7 })
+	model = [0.13, 0.13, 0.13, 0.13].fold(column, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
+	model.keys_left == 1 and model.pickups.map(|pickup| pickup.id) == [1]
 }
+
+# The key collects in the roll onto its cell, before the roll ends.
+expect {
+	before_key = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 8 } })
+	rolling = step(before_key, up_held, QueryResults.empty, 0.01).model
+	near = step(rolling, idle, QueryResults.empty, 0.1).model
+	nearer = step(near, idle, QueryResults.empty, 0.1).model
+	near.keys_left == 2 and nearer.keys_left == 1 and match nearer.ball.motion {
+		Rolling(_) => True
+		_ => False
+	}
+}
+
+# The key pickup lights a Point light one cell above the key's face. It peaks
+# in pale blue and is gone 0.66 s after the pickup.
+expect {
+	before_key = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 8 } })
+	rolling = step(before_key, up_held, QueryResults.empty, 0.01).model
+	picked = step(step(rolling, idle, QueryResults.empty, 0.1).model, idle, QueryResults.empty, 0.1).model
+	peak = step(picked, idle, QueryResults.empty, 0.1).model
+	faded = step(peak, idle, QueryResults.empty, 0.56).model
+	flash_pos = { x: 0.0, y: 1.5, z: 7.0 }
+	picked.keys_left == 1
+		and point_lights(view(picked)) == [Light.point(flash_pos, Flash.colour(Key, 0.0), 2.0)]
+			and point_lights(view(peak)) == [Light.point(flash_pos, Flash.colour(Key, 0.1), 2.0)]
+				and Flash.colour(Key, 0.1).b > Flash.colour(Key, 0.1).r
+					and point_lights(view(faded)) == []
+						and lights_in(view(faded)) == Theme.of_level(1).lights
+}
+
+point_lights : Vocabulary.Scene -> List(Vocabulary.Light)
+point_lights = |scene| lights_in(scene).keep_if(
+	|light| match light {
+		Point(_) => True
+		_ => False
+	},
+)
 
 at_pose : Model, World.Pose -> Model
 at_pose = |model, pose| { ..model, ball: Ball.start(pose) }
@@ -268,11 +461,11 @@ at_pose = |model, pose| { ..model, ball: Ball.start(pose) }
 before_exit : World.Pose
 before_exit = { cell: { x: 0, y: 1, z: 1 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: -1 } }
 
-expect step(at_pose(started, before_exit), up_held, QueryResults.empty, 0.1).model.phase == Playing
+expect step(at_pose(column, before_exit), up_held, QueryResults.empty, 0.1).model.phase == Playing
 
 # In Won the ball ignores input, and Escape still quits.
 expect {
-	won = { ..started, phase: Won }
+	won = { ..column, phase: Won }
 	after = step(won, up_held, QueryResults.empty, 0.1)
 	{ ..after.model.ball, bob: won.ball.bob } == won.ball and step(won, { ..idle, pressed: [Key.code(Escape)] }, QueryResults.empty, 0.1).commands == [Quit]
 }
@@ -280,7 +473,7 @@ expect {
 # A jump off the side from S falls, then the level restarts.
 expect {
 	space = { ..idle, held: [Key.code(Up)], pressed: [Key.code(Space)] }
-	facing_out = { ..at_pose(started, { ..started.level.start, forward: { x: -1, y: 0, z: 0 } }), keys_left: 1 }
+	facing_out = { ..at_pose(column, { ..column.level.start, forward: { x: -1, y: 0, z: 0 } }), keys_left: 1 }
 	jumped = step(facing_out, space, QueryResults.empty, 0.25).model
 	still_falling = step(jumped, idle, QueryResults.empty, 0.25).model
 	landed = step(still_falling, idle, QueryResults.empty, 0.5).model
@@ -292,39 +485,48 @@ expect {
 }
 
 expect {
-	collected = [0.13, 0.13, 0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
-	keys = view(collected).draws.keep_if(|d| d.tint == key_tint)
-	keys.map(|d| d.pos) == [{ x: 0.0, y: 2.0, z: 5.0 }] and keys.map(|d| d.id) == [key_ids + 1]
+	collected = [0.13, 0.13, 0.13, 0.13].fold(column, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
+	keys = key_draws(collected)
+	keys.map(|d| d.pos.z) == [5.0] and keys.map(|d| d.id) == [pickup_ids + 1]
 }
 
 expect {
-	draws = view({ ..started, keys_left: 0 }).draws
+	draws = draws_in(view({ ..column, keys_left: 0 }))
 	draws.keep_if(|d| d.tint == open_exit_tint).len() == 5 and !draws.any(|d| d.tint == closed_exit_tint)
 }
 
 expect {
-	won = { ..started, phase: Won }
-	view(won).draws.keep_if(|d| d.mesh == won.meshes.ball).map(|d| d.tint) == [won_ball_tint]
+	won = { ..column, phase: Won }
+	draws_in(view(won)).keep_if(|d| d.mesh == won.meshes.ball).map(|d| d.tint) == [won_ball_tint]
 }
 
-space : Input
+space : Vocabulary.Input
 space = { ..idle, pressed: [Key.code(Space)] }
 
-expect step(started, space, QueryResults.empty, 0.27).model.ball.motion == JumpingInPlace({ t: 0.5 })
+expect step(column, space, QueryResults.empty, 0.27).model.ball.motion == JumpingInPlace({ t: 0.5 })
 
 # Up and Space jump the level1 gap from the cell before it.
 expect {
-	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
+	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
 	jumped = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1).model
 	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and jumped.ball.motion == Jumping({ from: before_gap.ball.pose, offset: 0.0, t: 0.1 / 0.54 })
 }
 
-# A key in the roll's target cell is collected, though the jump starts from the cell behind it.
+# South with the pad's forward held jumps the gap too.
 expect {
-	on_layer1 = at_pose(started, { ..started.level.start, cell: { x: 0, y: 2, z: 6 } })
+	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
+	jump_forward = { ..stick_at(1.0), pressed: [Button.code(South)] }
+	jumped = step(before_gap, with_pads([jump_forward]), QueryResults.empty, 0.1).model
+	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and jumped.ball.motion == Jumping({ from: before_gap.ball.pose, offset: 0.0, t: 0.1 / 0.54 })
+}
+
+# A jump just after a roll starts passes high over the key in the roll's target cell, so the key stays.
+expect {
+	on_layer1 = at_pose(column, { ..column.level.start, cell: { x: 0, y: 2, z: 6 } })
 	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
 	jumped = step(rolling, space, QueryResults.empty, 0.01).model
-	jumped.collected.contains({ x: 0, y: 2, z: 5 }) and jumped.keys_left == 1 and match jumped.ball.motion {
+	landed = run(jumped, List.repeat(idle, 100)).model
+	landed.ball.motion == Still and landed.keys_left == 2 and match jumped.ball.motion {
 		Falling({ from, .. }) => from.cell == { x: 0, y: 2, z: 6 }
 		_ => False
 	}
@@ -332,7 +534,7 @@ expect {
 
 # The jump from the raised block lands on the floor one cell below its target.
 expect {
-	on_layer1 = at_pose(started, { ..started.level.start, cell: { x: 0, y: 2, z: 6 } })
+	on_layer1 = at_pose(column, { ..column.level.start, cell: { x: 0, y: 2, z: 6 } })
 	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
 	jumped = step(rolling, space, QueryResults.empty, 0.01).model
 	landed = step(jumped, idle, QueryResults.empty, 1.0).model
@@ -341,7 +543,7 @@ expect {
 
 # The bounce plays in the step a forward jump lands, and in no step before it.
 expect {
-	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
+	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
 	jumping = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1)
 	in_air = step(jumping.model, idle, QueryResults.empty, 0.3)
 	landing = step(in_air.model, idle, QueryResults.empty, 0.3)
@@ -350,37 +552,90 @@ expect {
 
 # A fall onto a lower block plays the bounce too.
 expect {
-	on_layer1 = at_pose(started, { ..started.level.start, cell: { x: 0, y: 2, z: 6 } })
+	on_layer1 = at_pose(column, { ..column.level.start, cell: { x: 0, y: 2, z: 6 } })
 	rolling = step(on_layer1, up_held, QueryResults.empty, 0.05).model
 	jumped = step(rolling, space, QueryResults.empty, 0.01).model
 	step(jumped, idle, QueryResults.empty, 1.0).commands == [Sound.play(bounce_id)]
 }
 
-# A jump in place does not bounce, and a fall off the level restarts it with no bounce.
+# A jump in place bounces as it lands. A fall off the level restarts it with no bounce.
 expect {
-	jumping_in_place = step(started, space, QueryResults.empty, 0.27).model
-	facing_out = at_pose(started, { ..started.level.start, forward: { x: -1, y: 0, z: 0 } })
+	jumping_in_place = step(column, space, QueryResults.empty, 0.27).model
+	facing_out = at_pose(column, { ..column.level.start, forward: { x: -1, y: 0, z: 0 } })
 	falling = step(facing_out, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.25).model
 	restarted = step(falling, idle, QueryResults.empty, 2.0)
-	step(jumping_in_place, idle, QueryResults.empty, 0.3).commands == [] and restarted.model.ball == started.ball and restarted.commands == []
+	step(jumping_in_place, idle, QueryResults.empty, 0.2).commands == [] and step(jumping_in_place, idle, QueryResults.empty, 0.3).commands == [Sound.play(bounce_id)] and restarted.model.ball == started.ball and restarted.commands == []
 }
 
-# With no control, in Cleared or Won, a landing is silent, as in the original.
+# Three blocks in a row with the ball on the last, facing the others. The
+# layers above add a wall or a ceiling.
+blocked : Str -> Model
+blocked = |layers| {
+	level = Level.parse("#\n#\n#\n\n${layers}start 0 0 2 +y -z\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: [], keys_left: 0 }
+}
+
+# One step of 0.01 s for each input. commands holds each step's commands.
+run : Model, List(Vocabulary.Input) -> { model : Model, commands : List(List(Command)) }
+run = |model, inputs| inputs.fold(
+	{ model, commands: [] },
+	|so_far, input| {
+		next = step(so_far.model, input, QueryResults.empty, 0.01)
+		{ model: next.model, commands: so_far.commands.append(next.commands) }
+	},
+)
+
+# A step with first, then 60 idle steps.
+then_idle : Vocabulary.Input -> List(Vocabulary.Input)
+then_idle = |first| [first].concat(List.repeat(idle, 60))
+
+# Steps of 0.01 s from the jump press on. Each entry is the bounces the step plays.
+bounces_after : Model, Vocabulary.Input -> List(U64)
+bounces_after = |model, press| run(model, then_idle(press)).commands.map(|commands| commands.keep_if(|c| c == Sound.play(bounce_id)).len())
+
+# Steps that played a bounce, counted from 1.
+bounce_steps : List(U64) -> List(U64)
+bounce_steps = |counts| counts.map_with_index(|count, i| List.repeat(i + 1, count)).join_map(|steps| steps)
+
+forward_jump : Vocabulary.Input
+forward_jump = { ..space, held: [Key.code(Up)] }
+
+# A wall one ahead: the bounce plays in the step of the hit, 0.082 s in, and
+# again in the step the ball lands back on its cell, 0.186 s in.
+expect bounce_steps(bounces_after(blocked(".\n#\n.\n\n"), forward_jump)) == [9, 19]
+
+# A wall two ahead: the hit 0.352 s in and the landing on the middle cell 0.528 s in.
+expect bounce_steps(bounces_after(blocked("#\n.\n.\n\n"), forward_jump)) == [36, 53]
+
+# A ceiling over a jump in place: the hit 0.118 s in and the landing 0.197 s in.
+expect bounce_steps(bounces_after(blocked(".\n.\n.\n\n.\n.\n#\n\n"), space)) == [12, 20]
+
+# A jump in place bounces once, as it lands 0.54 s in.
+expect bounce_steps(bounces_after(blocked(""), space)) == [55]
+
+# With no control, after the level end or in Won, a landing is silent, as in the original.
 expect {
-	before_gap = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 4 } })
+	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
 	jumping = step(before_gap, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.1).model
-	[Cleared, Won].all(|phase| step({ ..jumping, phase }, idle, QueryResults.empty, 0.6).commands == [])
+	[Ending(Ending.start(0)), Cleared(Ending.start(0)), Won].all(|phase| step({ ..jumping, phase }, idle, QueryResults.empty, 0.6).commands == [])
+}
+
+# After the level end the ball hides, so a wall hit plays no bounce. In Won the hit still bounces.
+expect {
+	jumped = step(blocked(".\n#\n.\n\n"), forward_jump, QueryResults.empty, 0.01).model
+	[Ending(Ending.start(0)), Cleared(Ending.start(0))].all(|phase| bounce_steps(bounces_after({ ..jumped, phase }, idle)) == [])
+		and bounce_steps(bounces_after({ ..jumped, phase: Won }, idle)).len() == 1
 }
 
 # Held Up rolls on through the cell with no step at rest.
 expect {
-	model = [0.13, 0.13].fold(started, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
+	model = [0.13, 0.13].fold(column, |m, dt| step(m, up_held, QueryResults.empty, dt).model)
 	model.ball.pose.cell == { x: 0, y: 1, z: 7 } and model.ball.motion != Still
 }
 
 # Held Up runs the ball to the level1 gap. Space on the approach to the edge clears it.
 expect {
-	two_before = at_pose(started, { ..started.level.start, cell: { x: 0, y: 1, z: 5 } })
+	two_before = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 5 } })
 	at_edge = step(two_before, up_held, QueryResults.empty, 0.26).model
 	jumped = step(at_edge, { ..space, held: [Key.code(Up)] }, QueryResults.empty, 0.06).model
 	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and match jumped.ball.motion {
@@ -389,30 +644,104 @@ expect {
 	}
 }
 
+exit_cell : World.Cell
+exit_cell = { x: 0, y: 1, z: 0 }
+
+# A roll onto the open exit with Up held. The level plays on for 0.1 s after
+# the ball centre passes into the exit cell, then ends with the banked score.
+# Up no longer rolls the ball, so it stops on the exit and does not roll over the edge.
 expect {
-	open = { ..at_pose(started, before_exit), keys_left: 0 }
-	finished = step(open, up_held, QueryResults.empty, 0.1)
-	switched = loaded(finished.model, "inca", [{ name: "inca_face", id: 7 }, { name: "sky/inca", id: 2 }])
-	after = step(switched, idle, QueryResults.empty, 0.1)
-	finished.commands == [Load({ pack: "inca", assets: ["inca_face", "sky/inca"] })]
-		and finished.model.phase == Cleared
-			and switched.meshes == { cube: 1, face: 7, ball: 4, sky: 2 }
-				and switched.bounce == bounce_id
-					and switched.level_number == 2
-						and switched.phase == Starting(Rules.start_pause)
-							and after.commands == [Unload("haze")]
-								and step(after.model, idle, QueryResults.empty, 0.1).commands == []
+	open = { ..at_pose(column, before_exit), keys_left: 0, score: { level: 2000, total: 0 } }
+	rolling = step(open, up_held, QueryResults.empty, 0.12)
+	reached = step(rolling.model, up_held, QueryResults.empty, 0.02)
+	waiting = step(reached.model, up_held, QueryResults.empty, 0.04)
+	ended = step(waiting.model, up_held, QueryResults.empty, 0.07)
+	stopped = step(ended.model, up_held, QueryResults.empty, 0.1).model
+	rolling.model.phase == Playing
+		and reached.model.phase == Exiting(0.1)
+			and match waiting.model.phase {
+				Exiting(seconds) => (seconds - 0.06).abs() < 0.0001
+				_ => False
+			}
+				and ended.model.phase == Ending({ seconds: 0.07, banked: 2000, skipped: False })
+					and ended.model.score == { level: 0, total: 2000 }
+						and [rolling, reached, waiting, ended].all(|s| s.commands == [])
+							and stopped.ball.motion == Still
+								and stopped.ball.pose.cell == exit_cell
 }
 
-# A Cleared level sends its Load once.
+# A forward jump onto the open exit with Up held stops on the exit, and the level ends in the next step.
 expect {
-	open = { ..at_pose(started, before_exit), keys_left: 0 }
-	finished = step(open, up_held, QueryResults.empty, 0.1).model
-	step(finished, idle, QueryResults.empty, 0.1).commands == []
+	open = { ..at_pose(column, { ..before_exit, cell: { x: 0, y: 1, z: 2 } }), keys_left: 0 }
+	jumped = step(open, forward_jump, QueryResults.empty, 0.01).model
+	landed = step(jumped, up_held, QueryResults.empty, 0.6).model
+	ended = step(landed, up_held, QueryResults.empty, 0.01).model
+	landed.phase == Exiting(0.0) and landed.ball.motion == Still and ended.phase == Ending({ ..Ending.start(0), seconds: 0.01 }) and ended.ball.pose.cell == exit_cell and ended.ball.motion == Still
+}
+
+# After the level end, the ball hides and the camera turns about the level.
+# The HUD gives way to the level end panel.
+expect {
+	ended = { ..at_pose(column, { ..before_exit, cell: exit_cell }), keys_left: 0, phase: Ending({ ..Ending.start(0), seconds: 0.5 }) }
+	scene = view(ended)
+	exiting = view({ ..ended, phase: Exiting(0.05) })
+	draws_in(scene).keep_if(|d| d.mesh == ended.meshes.ball) == []
+		and scene.camera == View.orbit(column.level.blocks, 0.5)
+			and scene.ui != exiting.ui
+				and exiting.camera == View.camera(ended.ball)
+					and exiting.ui == Hud.ui({ ..ended, phase: Playing })
+						and draws_in(exiting).keep_if(|d| d.mesh == ended.meshes.ball).len() == 1
+}
+
+# A pickup flash fades on through the level end.
+expect {
+	ended = { ..column, flashes: [{ pos: { x: 0.0, y: 1.5, z: 7.0 }, age: 0.0, kind: Key }], phase: Ending(Ending.start(0)) }
+	point_lights(view(ended)).len() == 1 and point_lights(view(step(ended, idle, QueryResults.empty, 0.7).model)) == []
+}
+
+press : Vocabulary.Input
+press = { ..idle, pressed: [Key.code(Space)] }
+
+# The first press finishes the banner and the count. The second goes on.
+# Levels 1 and 2 share the hiro Theme, so the step after it starts level 2
+# with the Theme's ids and sends no Load and no Unload.
+expect {
+	ended = { ..at_pose(column, { ..before_exit, cell: exit_cell }), keys_left: 0, score: { level: 0, total: 2000 }, phase: Ending(Ending.start(2000)) }
+	waited = step(ended, idle, QueryResults.empty, 0.3)
+	skipped = step(waited.model, press, QueryResults.empty, 0.01)
+	cleared = step(skipped.model, press, QueryResults.empty, 0.01)
+	next = step(cleared.model, idle, QueryResults.empty, 0.1)
+	waited.model.phase == Ending({ seconds: 0.3, banked: 2000, skipped: False })
+		and skipped.model.phase == Ending({ seconds: 0.31, banked: 2000, skipped: True })
+			and cleared.model.phase == Cleared({ seconds: 0.32, banked: 2000, skipped: True })
+				and cleared.model.level_number == 1
+					and [waited, skipped, cleared, next].all(|s| s.commands == [])
+						and next.model.level_number == 2
+							and next.model.phase == Starting(Rules.start_pause - 0.1)
+								and next.model.score == { level: 0, total: 2000 }
+									and next.model.meshes == started.meshes
+										and next.model.sounds == started.sounds
+											and step(next.model, idle, QueryResults.empty, 0.1).commands == []
+}
+
+# A pad's South is the press too. Up, Left and Right do not go on.
+expect {
+	finished = { ..column, phase: Ending({ ..Ending.start(0), seconds: 2.0 }) }
+	others = [up_held, { ..idle, pressed: [Key.code(Left)] }, { ..idle, pressed: [Key.code(Right)] }]
+	step(finished, with_pads([pad_pressing(South)]), QueryResults.empty, 0.01).model.phase == Cleared({ ..Ending.start(0), seconds: 2.01 })
+		and others.all(|input| step(finished, input, QueryResults.empty, 0.01).model.phase == Ending({ ..Ending.start(0), seconds: 2.01 }))
+}
+
+# The first step of a new level plays no chime for the coins left on the old
+# one, even when the new level has no pickups with their ids.
+expect {
+	cleared = { ..at_pose(started, before_exit), keys_left: 0, phase: Cleared(Ending.start(0)), pickups: started.pickups.map(|pickup| { ..pickup, id: pickup.id + 50 }) }
+	next = step(cleared, idle, QueryResults.empty, 0.01)
+	next.model.level_number == 2 and next.commands == []
 }
 
 # A loaded for a pack Kula did not ask for changes nothing.
-expect loaded(started, "inca", [{ name: "inca_face", id: 7 }]) == started
+expect loaded(started, "inca", manifest([("inca_face", 7)])) == started
 
 # During the pause the ball ignores input. After it, the level plays.
 expect {
@@ -422,9 +751,9 @@ expect {
 	paused.ball.motion == Still and playing.phase == Playing and step(playing, up_held, QueryResults.empty, 0.1).model.ball.motion != Still
 }
 
-expect view(on_level(2)).lights == Theme.of_level(2).lights
+expect lights_in(view(on_level(2))) == Theme.of_level(2).lights
 
-Move : [Roll, Left, Right, Leap]
+Move : [Roll, Left, Right, Leap, Press]
 
 # Each move starts with a short step that presses its keys. A long idle step then finishes it.
 play : Model, List(Move) -> Model
@@ -436,6 +765,7 @@ play = |model, moves| moves.fold(
 			Left => { ..idle, pressed: [Key.code(Left)] }
 			Right => { ..idle, pressed: [Key.code(Right)] }
 			Leap => { ..idle, held: [Key.code(Up)], pressed: [Key.code(Space)] }
+			Press => press
 		}
 		step(step(m, keys, QueryResults.empty, 0.01).model, idle, QueryResults.empty, 1.0).model
 	},
@@ -444,18 +774,185 @@ play = |model, moves| moves.fold(
 on_level : U64 -> Model
 on_level = |number| Rules.start(started.meshes, number)
 
+# Each route collects the key, every coin and the fruit, then takes the exit.
+# The exit banks 1000 for the key, 250 for each coin and 2500 for the fruit.
+# Each level waits after its exit until two presses: the first skips the count.
 expect {
-	played = play(on_level(2), [Roll, Roll, Right, Roll, Roll, Roll, Roll, Left, Leap, Roll, Roll, Roll])
-	played.keys_left == 0 and played.phase == Cleared
+	route = [Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Right, Roll, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll]
+	waiting = play(on_level(1), route.append(Press))
+	played = play(waiting, [Press])
+	waiting.level_number == 1 and played.level_number == 2 and played.score.total == 1000 + 2 * 250 + 2500
 }
 
+# The route jumps each gap between the rings.
 expect {
-	played = play(on_level(3), [Roll, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Leap, Roll, Roll])
-	played.keys_left == 0 and played.phase == Won
+	played = play(on_level(2), [Roll, Roll, Roll, Leap, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Left, Leap, Left, Roll, Right, Roll, Roll, Roll, Right, Roll, Roll, Roll, Roll, Right, Roll, Roll, Roll, Right, Roll, Left, Leap, Press, Press])
+	played.level_number == 3 and played.score.total == 1000 + 6 * 250 + 2500
 }
 
+# The route climbs a pillar onto the side of the bridge, rolls along it past
+# the key and climbs down the other pillar.
 expect {
-	open = { ..at_pose(on_level(3), before_exit), keys_left: 0 }
-	finished = step(open, up_held, QueryResults.empty, 0.1)
-	finished.model.phase == Won and finished.commands == []
+	played = play(on_level(3), [Roll, Roll, Roll, Right, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Left, Roll, Roll, Roll, Roll, Roll, Roll, Roll, Right, Roll, Roll, Roll, Press, Press])
+	played.phase == Won and played.score.total == 1000 + 10 * 250 + 2500
 }
+
+before_last_exit : World.Pose
+before_last_exit = { cell: { x: 7, y: 1, z: 5 }, up: { x: 0, y: 1, z: 0 }, forward: { x: 0, y: 0, z: 1 } }
+
+# The last level ends with the same sequence, then Won. Won draws the ball in
+# gold on the exit with the play camera and brings the HUD back.
+expect {
+	open = { ..at_pose(on_level(3), before_last_exit), keys_left: 0 }
+	rolling = step(open, up_held, QueryResults.empty, 0.1).model
+	reached = step(rolling, idle, QueryResults.empty, 0.1).model
+	ended = step(reached, idle, QueryResults.empty, 0.1).model
+	skipped = step(ended, press, QueryResults.empty, 0.01)
+	won = step(skipped.model, press, QueryResults.empty, 0.01)
+	still_won = step(won.model, press, QueryResults.empty, 1.0)
+	scene = view(won.model)
+	rolling.phase == Playing
+		and reached.phase == Exiting(0.1)
+			and ended.phase == Ending({ seconds: 0.1, banked: 0, skipped: False })
+				and won.model.phase == Won
+					and [skipped, won, still_won].all(|s| s.commands == [])
+						and still_won.model.phase == Won
+							and draws_in(scene).keep_if(|d| d.mesh == won.model.meshes.ball).map(|d| d.tint) == [won_ball_tint]
+								and scene.camera == View.camera(won.model.ball)
+									and scene.ui.drop_last(1) == Hud.ui({ ..won.model, phase: Playing })
+}
+
+enter : Vocabulary.Input
+enter = { ..idle, pressed: [Key.code(Enter)] }
+
+won_game : Model
+won_game = { ..at_pose(on_level(3), { ..before_last_exit, cell: { x: 7, y: 1, z: 6 } }), phase: Won, keys_left: 0, pickups: [], score: { level: 0, total: 6000 }, fruits: { now: [Apple, Watermelon, Pumpkin], saved: [Apple, Watermelon, Pumpkin] }, clock: Clock.start(40) }
+
+# In Won, Enter starts a fresh game on level 1. The hiro Theme stays loaded,
+# so the step sends no Load and no Unload. After the pause, level 1 plays.
+expect {
+	again = step(won_game, enter, QueryResults.empty, 0.01)
+	fresh = on_level(1)
+	playing = step(again.model, idle, QueryResults.empty, Rules.start_pause).model
+	again.commands == []
+		and { ..again.model, ball: fresh.ball, pickups: fresh.pickups } == { ..fresh, phase: Starting(Rules.start_pause - 0.01) }
+			and again.model.ball.pose == fresh.ball.pose
+				and again.model.pickups.map(|pickup| pickup.kind) == fresh.pickups.map(|pickup| pickup.kind)
+					and again.model.score == { level: 0, total: 0 }
+						and again.model.fruits == Fruit.none
+							and draws_in(view(again.model)).any(|d| d.mesh == started.meshes.apple)
+								and playing.phase == Playing
+}
+
+# A pad's South starts a fresh game too. Space and the other inputs do nothing in Won.
+expect {
+	others = [space, up_held, forward_jump, { ..idle, pressed: [Key.code(Left)] }, { ..idle, pressed: [Key.code(Right)] }, with_pads([pad_pressing(DpadUp)])]
+	step(won_game, with_pads([pad_pressing(South)]), QueryResults.empty, 0.01).model.level_number == 1
+		and others.all(|input| { ..step(won_game, input, QueryResults.empty, 0.01).model, ball: won_game.ball } == won_game)
+}
+
+# The South press that reaches Won does not also start a fresh game, and Enter does not go on from a level end.
+expect {
+	finished = { ..won_game, phase: Ending({ ..Ending.start(0), seconds: 2.0 }) }
+	step(finished, with_pads([pad_pressing(South)]), QueryResults.empty, 0.01).model.phase == Won
+		and step(finished, enter, QueryResults.empty, 0.01).model.phase == Ending({ ..Ending.start(0), seconds: 2.01 })
+			and step(started, enter, QueryResults.empty, 0.01).model == step(started, idle, QueryResults.empty, 0.01).model
+}
+
+# A fresh game keeps the loaded Theme. A level 1 with another Theme would need a Load and a loaded first.
+expect Theme.of_level(1).pack == Theme.of_level(Level.count).pack
+
+# Three blocks in a row with a coin on the middle one. The ball starts on the last, facing it.
+coin_run : Model
+coin_run = {
+	level = Level.parse("#\n#\n#\n\n0 0 1 +y coin\nstart 0 0 2 +y -z\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level, Apple), keys_left: 0 }
+}
+
+# A coin draws coin.glb unscaled, bobbing 140 to 180 units above its face.
+expect {
+	coins = draws_in(view(coin_run)).keep_if(|d| d.mesh == coin_run.meshes.coin)
+	match coins {
+		[coin] => coin.id == pickup_ids and coin.pos.z == 1.0 and coin.pos.y - 0.5 >= 140.0 / 512.0 and coin.pos.y - 0.5 <= 180.0 / 512.0 and coin.scale == Vec3.one and coin.tint == { r: 1.0, g: 1.0, b: 1.0 }
+		_ => False
+	}
+}
+
+# A roll onto the coin collects it, plays the chime once and adds 250 to the level score.
+expect {
+	rolled = run(coin_run, then_idle(up_held))
+	chimes = rolled.commands.join_map(|commands| commands).keep_if(|c| c == Sound.play(chime_id))
+	chimes.len() == 1 and rolled.model.pickups == [] and rolled.model.score.level == 250 and rolled.model.ball.pose.cell == { x: 0, y: 1, z: 1 }
+}
+
+expect launch({ seed: 0, args: [], assets: [] }).step_hz == 120
+
+# In the last 20 s the clock ticks once a second, louder each time.
+expect {
+	first = step({ ..started, clock: Clock.start(20) + 1 }, idle, QueryResults.empty, 0.01)
+	second = step(first.model, idle, QueryResults.empty, 0.01)
+	first.commands == [] and second.commands == [Play({ sound: tick_id, gain: 510.0 / 7000.0, pitch: 1.0, at: Here })]
+}
+
+# The clock runs until the level ends, then stops, so the tick stops too.
+expect {
+	open = { ..at_pose(started, before_exit), keys_left: 0, clock: Clock.start(5) + 1 }
+	reached = step(open, up_held, QueryResults.empty, 0.2).model
+	waiting = step(reached, idle, QueryResults.empty, 0.04)
+	ended = step(waiting.model, idle, QueryResults.empty, 0.1).model
+	reached.phase == Exiting(0.1)
+		and reached.clock == Clock.start(5)
+			and waiting.model.clock == Clock.start(5) - 1
+				and waiting.commands.len() == 1
+					and ended.clock == Clock.start(5) - 1
+						and step(ended, idle, QueryResults.empty, 2.0).commands == []
+							and step(ended, idle, QueryResults.empty, 2.0).model.clock == ended.clock
+}
+
+# At 0 the level restarts with a full clock and no tick. The rest of that step plays on the restarted level.
+expect {
+	last_step = step({ ..started, clock: 1 }, up_held, QueryResults.empty, 0.01)
+	fresh = step(started, up_held, QueryResults.empty, 0.01).model
+	last_step.model == { ..fresh, clock: Clock.start(Clock.default_seconds) } and last_step.commands == []
+}
+
+# The coin run with a fruit in place of the coin.
+fruit_run : Fruit.Fruits -> Model
+fruit_run = |fruits| {
+	level = Level.parse("#\n#\n#\n\n0 0 1 +y fruit\nstart 0 0 2 +y -z\n") ?? started.level
+	{ ..coin_run, level, pickups: Pickup.from_level(level, Fruit.next(fruits)), fruits }
+}
+
+# Each fruit draws its own mesh unscaled. Its centre bobs 120 to 160 units above its face.
+expect {
+	fruit_mesh = |fruits| draws_in(view(fruit_run(fruits))).keep_if(|d| d.id == pickup_ids)
+	apple = fruit_mesh(Fruit.none)
+	watermelon = fruit_mesh(Fruit.collect(Fruit.none, Apple))
+	pumpkin = fruit_mesh(Fruit.collect(Fruit.collect(Fruit.none, Apple), Watermelon))
+	match (apple, watermelon, pumpkin) {
+		([a], [w], [p]) => a.mesh == started.meshes.apple and w.mesh == started.meshes.watermelon and p.mesh == started.meshes.pumpkin and a.scale == Vec3.one and a.pos.y - 0.5 >= 120.0 / 512.0 and a.pos.y - 0.5 <= 160.0 / 512.0
+		_ => False
+	}
+}
+
+# A roll onto the apple collects it, plays the jingle once, adds 2500 to the level score and lights a fruit flash.
+expect {
+	rolled = run(fruit_run(Fruit.none), then_idle(up_held))
+	rolled.commands.join_map(|commands| commands) == [Sound.play(jingle_id)] and rolled.model.pickups == [] and rolled.model.score.level == 2500 and rolled.model.fruits.now == [Apple] and rolled.model.flashes.all(|flash| flash.kind == Fruit(Apple))
+}
+
+# Two keys in a row, and no exit.
+key_run : Model
+key_run = {
+	level = Level.parse("#\n#\n#\n#\n\n0 0 2 +y key\n0 0 1 +y key\nstart 0 0 3 +y -z\n") ?? started.level
+	{ ..started, level, ball: Ball.start(level.start), pickups: Pickup.from_level(level, Apple), keys_left: Level.keys(level) }
+}
+
+# Rolling over both keys plays the key sound for the first, then only the last-key sound for the last.
+expect {
+	rolled = run(key_run, List.repeat(up_held, 60))
+	rolled.commands.join_map(|commands| commands) == [Sound.play(key_sound_id), Sound.play(last_key_id)] and rolled.model.keys_left == 0
+}
+
+# Two keys taken in one step play the key sound, then the last-key sound.
+expect pickup_sounds(key_run, { ..key_run, pickups: [], keys_left: 0 }) == [Sound.play(key_sound_id), Sound.play(last_key_id)]

@@ -2,24 +2,33 @@ import "levels/level1.txt" as level1 : Str
 import "levels/level2.txt" as level2 : Str
 import "levels/level3.txt" as level3 : Str
 import World
+import Clock
 import Grid
 
 Level := [].{
 	count : U64
 	count = texts.len()
 
+	keys : World.Level -> U64
+	keys = |level| level.items.keep_if(|entry| entry.item == Key).len()
+
 	# Levels count from 1. A number past the last level gives empty text, which does not parse.
 	text : U64 -> Str
 	text = |number| texts.get(number - 1) ?? ""
 
 	# Layers run bottom first, with a blank line between. Row index is z,
-	# column index is x and layer index is y. RaggedRow carries the line
+	# column index is x and layer index is y. A line with a space is an entry:
+	# `x y z face item` or `start x y z face forward`, where x y z is a block.
+	# A `time n` line sets the start time to n seconds. Without it, the time is
+	# Clock.default_seconds. RaggedRow, BadEntry and NoBlock carry the line
 	# number, counted from 1.
-	parse : Str -> Try(World.Level, [RaggedRow(U64), UnknownChar(Str), NoStart, TwoStarts])
+	parse : Str -> Try(World.Level, [RaggedRow(U64), UnknownChar(Str), NoStart, TwoStarts, BadEntry(U64), NoBlock(U64)])
 	parse = |source| {
 		var $blocks = Set.empty()
 		var $items = []
 		var $starts = []
+		var $entries = []
+		var $time = Err(NoTime)
 		var $width = 0
 		var $line_number = 0
 		var $y = 0
@@ -27,13 +36,24 @@ Level := [].{
 		for raw in Str.split_on(source, "\n") {
 			line = Str.drop_suffix(raw, "\r")
 			$line_number = $line_number + 1
+			bytes = Str.to_utf8(line)
 			if line == "" {
 				if $z > 0 {
 					$y = $y + 1
 					$z = 0
 				}
+			} else if bytes.contains(' ') {
+				match (entry(line), $time) {
+					(Ok(Time(seconds)), Err(NoTime)) => {
+						$time = Ok(seconds)
+					}
+					(Ok(Time(_)), Ok(_)) => return Err(BadEntry($line_number))
+					(Ok(OnBlock(e)), _) => {
+						$entries = $entries.append({ line: $line_number, entry: e })
+					}
+					(Err(Bad), _) => return Err(BadEntry($line_number))
+				}
 			} else {
-				bytes = Str.to_utf8(line)
 				if $width == 0 {
 					$width = bytes.len()
 				} else if bytes.len() != $width {
@@ -50,11 +70,11 @@ Level := [].{
 						}
 						Ok(Start) => {
 							$blocks = $blocks.insert(block)
-							$starts = $starts.append(above)
+							$starts = $starts.append({ cell: above, up, forward: { x: 0, y: 0, z: -1 } })
 						}
 						Ok(OnTop(item)) => {
 							$blocks = $blocks.insert(block)
-							$items = $items.append({ cell: above, item })
+							$items = $items.append({ cell: above, up, item })
 						}
 						Err(Unknown) => return Err(UnknownChar(Str.from_utf8([byte]) ?? "?"))
 					}
@@ -63,9 +83,24 @@ Level := [].{
 				$z = $z + 1
 			}
 		}
+		for numbered in $entries {
+			{ block, face, kind } = numbered.entry
+			if !$blocks.contains(block) {
+				return Err(NoBlock(numbered.line))
+			}
+			cell_on_face = Grid.add(block, face)
+			match kind {
+				Item(item) => {
+					$items = $items.append({ cell: cell_on_face, up: face, item })
+				}
+				StartFacing(forward) => {
+					$starts = $starts.append({ cell: cell_on_face, up: face, forward })
+				}
+			}
+		}
 		match $starts {
 			[] => Err(NoStart)
-			[cell] => Ok({ blocks: $blocks, items: $items, start: { cell, up, forward: { x: 0, y: 0, z: -1 } } })
+			[start] => Ok({ blocks: $blocks, items: $items, start, time: $time ?? Clock.default_seconds })
 			_ => Err(TwoStarts)
 		}
 	}
@@ -87,57 +122,180 @@ tile = |byte| match byte {
 	_ => Err(Unknown)
 }
 
+Entry : { block : World.Cell, face : World.Cell, kind : [Item(World.Item), StartFacing(World.Cell)] }
+
+# A start time of 0 would end the level in its first step.
+entry : Str -> Try([OnBlock(Entry), Time(U64)], [Bad])
+entry = |line| {
+	parts = Str.split_on(line, " ").keep_if(|part| part != "")
+	match parts {
+		["time", seconds] => {
+			n = parse_signed_int(seconds)?.to_u64_try().map_err(|_| Bad)?
+			if n > 0 {
+				Ok(Time(n))
+			} else {
+				Err(Bad)
+			}
+		}
+		["start", x, y, z, face_name, forward_name] => {
+			block = parse_cell(x, y, z)?
+			face = axis(face_name)?
+			forward = axis(forward_name)?
+			if Grid.dot(face, forward) == 0 {
+				Ok(OnBlock({ block, face, kind: StartFacing(forward) }))
+			} else {
+				Err(Bad)
+			}
+		}
+		[x, y, z, face_name, item_name] => {
+			block = parse_cell(x, y, z)?
+			face = axis(face_name)?
+			item = match item_name {
+				"key" => Ok(Key)
+				"coin" => Ok(Coin)
+				"fruit" => Ok(Fruit)
+				"exit" => Ok(Exit)
+				_ => Err(Bad)
+			}?
+			Ok(OnBlock({ block, face, kind: Item(item) }))
+		}
+		_ => Err(Bad)
+	}
+}
+
+parse_cell : Str, Str, Str -> Try(World.Cell, [Bad])
+parse_cell = |x, y, z| Ok({ x: parse_signed_int(x)?, y: parse_signed_int(y)?, z: parse_signed_int(z)? })
+
+axis : Str -> Try(World.Cell, [Bad])
+axis = |name| match name {
+	"+x" => Ok({ x: 1, y: 0, z: 0 })
+	"-x" => Ok({ x: -1, y: 0, z: 0 })
+	"+y" => Ok({ x: 0, y: 1, z: 0 })
+	"-y" => Ok({ x: 0, y: -1, z: 0 })
+	"+z" => Ok({ x: 0, y: 0, z: 1 })
+	"-z" => Ok({ x: 0, y: 0, z: -1 })
+	_ => Err(Bad)
+}
+
+# At most 6 digits, so the value cannot overflow an I32.
+parse_signed_int : Str -> Try(I32, [Bad])
+parse_signed_int = |text| {
+	bytes = Str.to_utf8(text)
+	digits = if bytes.first() == Ok('-') {
+		bytes.drop_first(1)
+	} else {
+		bytes
+	}
+	if digits.is_empty() or digits.len() > 6 {
+		return Err(Bad)
+	}
+	var $value = 0
+	for byte in digits {
+		if byte < '0' or byte > '9' {
+			return Err(Bad)
+		}
+		$value = $value * 10 + (byte - '0').to_i32()
+	}
+	if bytes.first() == Ok('-') {
+		Ok(0 - $value)
+	} else {
+		Ok($value)
+	}
+}
+
 cell : I32, I32, I32 -> World.Cell
 cell = |x, y, z| { x, y, z }
 
-# The route through level1, from S at the bottom of the file towards E at the top:
-# 1. Roll straight along -z from S over the first key.
-# 2. Climb the wall of the upper layer and roll onto its top.
-# 3. Collect the second key, then roll over the far edge onto the side of the block.
-# 4. Climb straight back onto the lower layer.
-# 5. Jump the gap two cells ahead.
-# 6. Roll on to the exit.
+# Level 1 is Hiro level 1: a ring of 4 × 7 blocks round two 2 × 2 holes.
 expect {
 	level = Level.parse(Level.text(1))
-	level.map_ok(|l| l.start) == Ok({ cell: cell(0, 1, 9), up: cell(0, 1, 0), forward: cell(0, 0, -1) })
+	level.map_ok(|l| l.start) == Ok({ cell: cell(0, 1, 6), up: cell(0, 1, 0), forward: cell(0, 0, -1) })
 }
 
 expect {
 	level = Level.parse(Level.text(1))
 	level.map_ok(|l| l.items) == Ok([
-		{ cell: cell(0, 1, 0), item: Exit },
-		{ cell: cell(0, 1, 7), item: Key },
-		{ cell: cell(0, 2, 5), item: Key },
+		{ cell: cell(0, 1, 4), up: cell(0, 1, 0), item: Coin },
+		{ cell: cell(3, 1, 1), up: cell(0, 1, 0), item: Coin },
+		{ cell: cell(0, 1, 0), up: cell(0, 1, 0), item: Exit },
+		{ cell: cell(3, 1, 6), up: cell(0, 1, 0), item: Fruit },
+		{ cell: cell(3, 1, 3), up: cell(0, 1, 0), item: Key },
 	])
 }
 
 expect {
-	level = Level.parse(Level.text(1))
-	level.map_ok(|l| l.blocks.len()) == Ok(11)
-}
-
-expect {
 	blocks = Level.parse(Level.text(1)).map_ok(|l| l.blocks) ?? Set.empty()
-	Grid.has_block(blocks, cell(0, 0, 9)) and Grid.has_block(blocks, cell(0, 1, 6)) and !Grid.has_block(blocks, cell(0, 0, 3)) and !Grid.has_block(blocks, cell(0, 1, 7))
+	blocks.len() == 20 and Grid.has_block(blocks, cell(3, 0, 3)) and !Grid.has_block(blocks, cell(1, 0, 1)) and !Grid.has_block(blocks, cell(2, 0, 5))
 }
 
 expect Level.parse("#S\n##\n\n..\n.") == Err(RaggedRow(5))
 expect Level.parse("#S\n#x") == Err(UnknownChar("x"))
 expect Level.parse("##\n##") == Err(NoStart)
 expect Level.parse("#S\nS#") == Err(TwoStarts)
-expect Level.parse("..\n\nS.\n") == Ok({ blocks: Set.from_list([cell(0, 1, 0)]), items: [], start: { cell: cell(0, 2, 0), up: cell(0, 1, 0), forward: cell(0, 0, -1) } })
+expect Level.parse("..\n\nS.\n") == Ok({ blocks: Set.from_list([cell(0, 1, 0)]), items: [], start: { cell: cell(0, 2, 0), up: cell(0, 1, 0), forward: cell(0, 0, -1) }, time: 99 })
+
+# Entries put items and the start on any face, with any forward.
+expect {
+	source = "##\n\n#.\n\n0 0 0 -x key\n1 0 0 +y exit\n0 1 0 +z key\nstart 1 0 0 +x +y\n"
+	Level.parse(source)
+		== Ok({
+			blocks: Set.from_list([cell(0, 0, 0), cell(1, 0, 0), cell(0, 1, 0)]),
+			items: [
+				{ cell: cell(-1, 0, 0), up: cell(-1, 0, 0), item: Key },
+				{ cell: cell(1, 1, 0), up: cell(0, 1, 0), item: Exit },
+				{ cell: cell(0, 1, 1), up: cell(0, 0, 1), item: Key },
+			],
+			start: { cell: cell(2, 0, 0), up: cell(1, 0, 0), forward: cell(0, 1, 0) },
+			time: 99,
+		})
+}
+
+# scripts/test_convert_level.py expects the converter to write this text for its synthetic level.
+expect {
+	source = "#..\n###\n###\n\n2 0 2 +y exit\n1 0 2 +y key\n2 0 2 +x key\nstart 0 0 2 +y -z\n"
+	counts = Level.parse(source).map_ok(|l| { blocks: l.blocks.len(), keys: l.items.keep_if(|e| e.item == Key).len(), exits: l.items.keep_if(|e| e.item == Exit).len(), start: l.start })
+	counts == Ok({ blocks: 7, keys: 2, exits: 1, start: { cell: cell(0, 1, 2), up: cell(0, 1, 0), forward: cell(0, 0, -1) } })
+}
+
+# The shortcuts and the entries mix: S is the start and K and E sit with the entry items.
+expect {
+	level = Level.parse("SK\n\n1 0 0 -z exit\n")
+	level.map_ok(|l| { start: l.start.cell, items: l.items.map(|e| { cell: e.cell, item: e.item }) })
+		== Ok({ start: cell(0, 1, 0), items: [{ cell: cell(1, 1, 0), item: Key }, { cell: cell(1, 0, -1), item: Exit }] })
+}
+
+expect Level.parse("#S\n\nstart 0 0 0 +y -z\n") == Err(TwoStarts)
+expect Level.parse("##\n\nstart 0 0 0 +y +y\n") == Err(BadEntry(3))
+expect Level.parse("##\n\n0 0 0 +w key\nstart 0 0 0 +y -z\n") == Err(BadEntry(3))
+expect Level.parse("##\n\n0 0 0 +y gem\n") == Err(BadEntry(3))
+expect Level.parse("S#\n\n1 0 0 +z coin\n").map_ok(|l| l.items) == Ok([{ cell: cell(1, 0, 1), up: cell(0, 0, 1), item: Coin }])
+expect Level.parse("S#\n\n1 0 0 -x fruit\n").map_ok(|l| l.items) == Ok([{ cell: cell(0, 0, 0), up: cell(-1, 0, 0), item: Fruit }])
+expect Level.parse("##\n\n0 0 x +y key\n") == Err(BadEntry(3))
+expect Level.parse("##\n\n0 0 0 +y key extra\n") == Err(BadEntry(3))
+expect Level.parse("##\n\n5 0 0 +y key\nstart 0 0 0 +y -z\n") == Err(NoBlock(3))
+expect Level.parse("##\n\nstart 0 -1 0 +y -z\n") == Err(NoBlock(3))
+expect parse_signed_int("-12") == Ok(-12) and parse_signed_int("034") == Ok(34) and parse_signed_int("-") == Err(Bad) and parse_signed_int("") == Err(Bad) and parse_signed_int("1234567") == Err(Bad)
+
+# A time line sets the start time. It may come anywhere among the entries, once.
+expect Level.parse("S\n\ntime 45\n").map_ok(|l| l.time) == Ok(45)
+expect Level.parse("time 45\nS\n").map_ok(|l| l.time) == Ok(45)
+expect Level.parse("S\n\ntime 45\ntime 30\n") == Err(BadEntry(4))
+expect Level.parse("S\n\ntime 0\n") == Err(BadEntry(3))
+expect Level.parse("S\n\ntime -5\n") == Err(BadEntry(3))
+expect Level.parse("S\n\ntime\n") == Err(RaggedRow(3))
+expect Level.parse("S\n\ntime 4 5\n") == Err(BadEntry(3))
 
 expect Level.count == 3
 expect Level.parse(Level.text(4)) == Err(NoStart)
 
-# level2 turns twice and jumps a gap.
+# Level 2 is Hiro level 2: three rings with a one-cell gap between each two.
 expect {
 	level = Level.parse(Level.text(2))
-	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).len(), blocks: l.blocks.len() }) == Ok({ start: cell(0, 1, 7), keys: 2, blocks: 11 })
+	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).map(|e| e.cell), coins: l.items.keep_if(|e| e.item == Coin).len(), blocks: l.blocks.len() }) == Ok({ start: cell(0, 1, 8), keys: [cell(0, 1, 0)], coins: 6, blocks: 38 })
 }
 
-# level3 climbs a tower two blocks high.
+# Level 3 is Hiro level 3. Its key sits on the +z side of a bridge three blocks up.
 expect {
 	level = Level.parse(Level.text(3))
-	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).map(|e| e.cell), blocks: l.blocks.len() }) == Ok({ start: cell(0, 1, 9), keys: [cell(0, 2, 5), cell(0, 3, 6)], blocks: 12 })
+	level.map_ok(|l| { start: l.start.cell, keys: l.items.keep_if(|e| e.item == Key).map(|e| { cell: e.cell, up: e.up }), coins: l.items.keep_if(|e| e.item == Coin).len(), blocks: l.blocks.len() }) == Ok({ start: cell(4, 1, 6), keys: [{ cell: cell(5, 3, 1), up: cell(0, 0, 1) }], coins: 10, blocks: 40 })
 }
