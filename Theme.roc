@@ -25,8 +25,9 @@ by_level = [hiro, hiro, hiro]
 themes : List(Theme.Theme)
 themes = [hiro, haze, inca, arctic]
 
-# HIRO.TGI lights the original's Y+ faces (Kula's +z) bright and its Y- faces dark, so the sun comes from +z.
-# The lights are its block colours, scaled so the faces show near the original's tile colours.
+# HIRO.TGI draws the original's Y+ faces (Kula's +z) light and its Y- faces dark, so the sun comes from +z.
+# The light colours reuse its block colours, which the original only fades far faces toward.
+# The scales bring the faces near the original's tile colours.
 hiro : Theme.Theme
 hiro = theme("hiro", { x: -2.0 / 7.0, y: -3.0 / 7.0, z: -6.0 / 7.0 }, block_colour(1.7, 140, 128, 102), block_colour(0.2, 76, 102, 179), block_colour(0.78, 128, 128, 140))
 
