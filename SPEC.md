@@ -425,17 +425,18 @@ copies it with the phases `Exiting`, `Ending` and `Cleared` (`Rules.Phase`).
 ## HUD
 
 The original draws its HUD with sprites on a 320 × 256 screen. Kula draws
-Text panels (`Hud.ui`), because the engine has no UI images. The original
+panels (`Hud.ui`): Image panels for the keys and the fruit, and Text panels
+for the rest. The original
 hides the HUD once a level ends (`main.c:648-680`, Code). Kula hides it in
 `Ending` and `Cleared`. See Level end. In `Won` the HUD shows the banked
 total and a `Press Enter to play again` prompt.
 
 | Fact | Original | Label | Clone |
 |---|---|---|---|
-| Keys | One icon a key, lit when collected, from x 16, y 219 (`hud.c:456-466`, `sprite_init.c:75-76`) | Code | `Keys n / total` in a panel at the bottom left |
+| Keys | One icon a key, lit when collected, from x 16, y 219 (`hud.c:456-466`, `sprite_init.c:75-76`) | Code | One key icon for each key in a panel at the bottom left. The icons light in order as keys are collected. `Keys n / total` until the icons load |
 | Level score | 7 digits at x 100, y 218 (`hud.c:142`, `sprite_init.c:511`) | Code | `Level n` in a panel at the bottom, 30% of the way across |
 | Total score | 7 digits at x 100, y 236, under the level score (`hud.c:135`, `sprite_init.c:510`) | Code | `Score n` under `Level n` in the same panel |
-| Fruit | Five icons at the bottom right, each lit when its bit is set (`hud.c:468-487`). With all five, the icons turn into BONUS letters | Code | `Fruit n / 5` in a panel at the bottom right, where n counts the fruit set. No BONUS letters |
+| Fruit | Five icons at the bottom right, each lit when its bit is set (`hud.c:468-487`). With all five, the icons turn into BONUS letters | Code | Five fruit icons in a panel at the bottom right, each lit when its fruit is collected. Kula has one fruit icon, not one for each fruit. `Fruit n / 5` until the icons load. No BONUS letters |
 | Time | An hourglass and digits at the top centre (`hud.c:270-287`) | Code | A change from the original: `Time n` in its own panel at the top centre at all times, no hourglass. See Level clock |
 
 ## Not copied

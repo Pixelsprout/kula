@@ -7,6 +7,7 @@ import Score
 import Clock
 import Fruit
 import Sounds
+import Icons
 import Ending
 
 Rules := [].{
@@ -19,13 +20,13 @@ Rules := [].{
 	# pickups holds the items not yet collected. The Level keeps every item.
 	# Levels count from 1. unloads holds the packs the next step unloads.
 	# clock holds the steps left.
-	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, sounds : Sounds.Sounds, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, fruits : Fruit.Fruits, flashes : List(Flash.Flash), clock : U64, unloads : List(Str) }
+	Model : { level_number : U64, level : World.Level, ball : Ball.Ball, meshes : World.Meshes, sounds : Sounds.Sounds, icons : Icons.Icons, phase : Phase, keys_left : U64, pickups : List(Pickup.Pickup), score : Score.Score, fruits : Fruit.Fruits, flashes : List(Flash.Flash), clock : U64, unloads : List(Str) }
 
 	start : World.Meshes, U64 -> Model
 	start = |meshes, level_number| start_numbered(meshes, level_number, Fruit.none)
 
 	restart : Model -> Model
-	restart = |model| { ..start_numbered(model.meshes, model.level_number, Fruit.die(model.fruits)), sounds: model.sounds, score: Score.die(model.score, model.level_number) }
+	restart = |model| { ..start_numbered(model.meshes, model.level_number, Fruit.die(model.fruits)), sounds: model.sounds, icons: model.icons, score: Score.die(model.score, model.level_number) }
 
 	start_pause : F32
 	start_pause = 1.0
@@ -201,9 +202,9 @@ parse_or_crash = |text| match Level.parse(text) {
 	Err(err) => crash "The level does not parse: ${Str.inspect(err)}"
 }
 
-# The new level keeps the loaded sounds and waits start_pause before play.
+# The new level keeps the loaded sounds and icons, and waits start_pause before play.
 begin_level : Rules.Model, U64, Fruit.Fruits, Score.Score -> Rules.Model
-begin_level = |model, level_number, fruits, score| { ..start_numbered(model.meshes, level_number, fruits), sounds: model.sounds, score, phase: Starting(Rules.start_pause) }
+begin_level = |model, level_number, fruits, score| { ..start_numbered(model.meshes, level_number, fruits), sounds: model.sounds, icons: model.icons, score, phase: Starting(Rules.start_pause) }
 
 start_numbered : World.Meshes, U64, Fruit.Fruits -> Rules.Model
 start_numbered = |meshes, level_number, fruits| start_parsed(meshes, level_number, parse_or_crash(Level.text(level_number)), fruits)
@@ -212,7 +213,7 @@ start_numbered = |meshes, level_number, fruits| start_parsed(meshes, level_numbe
 start_parsed : World.Meshes, U64, World.Level, Fruit.Fruits -> Rules.Model
 start_parsed = |meshes, level_number, level, fruits| {
 	pickups = Pickup.from_level(level, Fruit.next(fruits))
-	{ level_number, level, ball: Ball.start(level.start), meshes, sounds: Sounds.none, phase: Playing, keys_left: Level.keys(level), pickups, score: Score.zero, fruits, flashes: [], clock: Clock.start(level.time), unloads: [] }
+	{ level_number, level, ball: Ball.start(level.start), meshes, sounds: Sounds.none, icons: Icons.none, phase: Playing, keys_left: Level.keys(level), pickups, score: Score.zero, fruits, flashes: [], clock: Clock.start(level.time), unloads: [] }
 }
 
 # An item counts only for a ball on its face: two items can share a cell on different faces.
@@ -333,9 +334,9 @@ expect {
 
 # A fresh game from Won resets the scores, the fruit set, the keys and the clock.
 expect {
-	won = { ..at(Rules.start(meshes, 3), last_exit_cell), phase: Won, keys_left: 0, pickups: [], score: { level: 0, total: 6000 }, fruits: { now: [Apple, Watermelon, Pumpkin], saved: [Apple, Watermelon, Pumpkin] }, clock: 40, sounds: { ..Sounds.none, bounce: 3 } }
+	won = { ..at(Rules.start(meshes, 3), last_exit_cell), phase: Won, keys_left: 0, pickups: [], score: { level: 0, total: 6000 }, fruits: { now: [Apple, Watermelon, Pumpkin], saved: [Apple, Watermelon, Pumpkin] }, clock: 40, sounds: { ..Sounds.none, bounce: 3 }, icons: { key: 7, fruit: 8 } }
 	again = Rules.play_again(True)(won)
-	again == { ..Rules.start(meshes, 1), sounds: won.sounds, phase: Starting(Rules.start_pause) }
+	again == { ..Rules.start(meshes, 1), sounds: won.sounds, icons: won.icons, phase: Starting(Rules.start_pause) }
 		and again.score == Score.zero
 			and again.fruits == Fruit.none
 				and again.pickups.map(|pickup| pickup.kind) == [Coin, Coin, Fruit(Apple), Key]
@@ -492,13 +493,14 @@ expect {
 	Rules.run_clock(model).clock == 1 and Rules.run_clock(Rules.run_clock(model)).clock == Clock.start(Clock.default_seconds)
 }
 
-# The sound ids survive a restart and a new level.
+# The sound and icon ids survive a restart and a new level.
 expect {
 	sounds = { ..Sounds.none, bounce: 3, chime: 6, tick: 4 }
-	model = { ..Rules.start(meshes, 1), sounds, clock: 1 }
+	icons = { key: 7, fruit: 8 }
+	model = { ..Rules.start(meshes, 1), sounds, icons, clock: 1 }
 	restarted = Rules.run_clock(model)
 	next = Rules.next_level({ ..model, phase: Cleared(Ending.start(0)) })
-	restarted.sounds == sounds and next.sounds == sounds and next.clock == Clock.start(Clock.default_seconds)
+	restarted.sounds == sounds and next.sounds == sounds and restarted.icons == icons and next.icons == icons and next.clock == Clock.start(Clock.default_seconds)
 }
 
 # The exit sits on the +y face of block (0, 0, 0) and a fruit on the -x face of block (1, 1, 0). The level has no keys.

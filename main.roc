@@ -24,6 +24,7 @@ import Level
 import Clock
 import Fruit
 import Sounds
+import Icons
 import Ending
 
 Model : Rules.Model
@@ -34,7 +35,7 @@ launch = |_config| { ..Launch.default, step_hz: Clock.step_hz }
 init : Config -> { model : Model, commands : List(Command) }
 init = |_config| {
 	model = Rules.start(View.primitive_meshes, 1)
-	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat(Sounds.assets) }), load_theme(1)] }
+	{ model, commands: [Load({ pack: kula_pack, assets: View.assets.concat(Sounds.assets).concat(Icons.assets) }), load_theme(1)] }
 }
 
 # The kula pack holds what every Theme shares. It stays loaded for the whole game.
@@ -53,7 +54,7 @@ loaded = |model, pack, manifest| {
 	current = Theme.of_level(model.level_number)
 	next_theme = Theme.of_level(model.level_number + 1)
 	if pack == kula_pack {
-		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), sounds: Sounds.resolve(manifest) }
+		{ ..model, meshes: View.kula_meshes(model.meshes, manifest), sounds: Sounds.resolve(manifest), icons: Icons.resolve(manifest) }
 	} else if Rules.cleared(model.phase) and pack == next_theme.pack {
 		next = Rules.next_level({ ..model, meshes: View.theme_meshes(model.meshes, manifest, next_theme.face, next_theme.sky) })
 		{ ..next, unloads: [current.pack] }
@@ -260,8 +261,8 @@ manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, size: {
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
 started = {
-	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "hiro_face", "sky/hiro", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }).model
-	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("key", 10), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id), ("sound/key", key_sound_id), ("sound/last_key", last_key_id)])
+	booted = init({ seed: 0, args: [], assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "hiro_face", "sky/hiro", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key", "image/key", "image/fruit"] }).model
+	kula = manifest([("ball", 4), ("coin", 6), ("apple", 7), ("watermelon", 8), ("pumpkin", 9), ("key", 10), ("sound/bounce", bounce_id), ("sound/chime", chime_id), ("sound/tick", tick_id), ("sound/jingle", jingle_id), ("sound/key", key_sound_id), ("sound/last_key", last_key_id), ("image/key", key_icon_id), ("image/fruit", fruit_icon_id)])
 	loaded(loaded(booted, "kula", kula), "hiro", manifest([("hiro_face", 5), ("sky/hiro", 1)]))
 }
 
@@ -282,6 +283,12 @@ key_sound_id = 65541
 
 last_key_id : U32
 last_key_id = 65542
+
+key_icon_id : U32
+key_icon_id = 131073
+
+fruit_icon_id : U32
+fruit_icon_id = 131074
 
 idle : Vocabulary.Input
 idle = Input.empty
@@ -305,9 +312,10 @@ lights_in = |scene| scene.nodes.join_map(
 	},
 )
 
-expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key"] }), Load({ pack: "hiro", assets: ["hiro_face", "sky/hiro"] })]
+expect init({ seed: 0, args: [], assets: [] }).commands == [Load({ pack: "kula", assets: ["ball", "coin", "apple", "watermelon", "pumpkin", "key", "sound/bounce", "sound/chime", "sound/tick", "sound/jingle", "sound/key", "sound/last_key", "image/key", "image/fruit"] }), Load({ pack: "hiro", assets: ["hiro_face", "sky/hiro"] })]
 expect init({ seed: 0, args: [], assets: [] }).model.meshes == { sphere: 2, face: 0, ball: 0, coin: 0, apple: 0, watermelon: 0, pumpkin: 0, key: 0, sky: 0 }
 expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { ..Sounds.none, bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
+expect init({ seed: 0, args: [], assets: [] }).model.icons == Icons.none and started.icons == { key: key_icon_id, fruit: fruit_icon_id }
 expect started.meshes == { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
 expect view(started).sky == 1
 expect started.ball == Ball.start(started.level.start)
