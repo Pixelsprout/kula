@@ -1,8 +1,8 @@
-app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/mesh-5Fmg6uFHADmSBmZxNWDg25VStK6mU7YqhkWEXHjMEGNP.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/platform-2gvPTPztQ7D8yQsMvRTD4rBKS8VmSwMCPZ432eWzNNtJ.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.6.0/ui-5msrKWjNRwuEBomX2R1CBFRycCCjrQCPjhEvJXtwWbU6.tar.zst" }
+app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/mesh-ASrdD2SvXz4UPX3tBfs8RoNo2p7R1FseoZH4iXmWyjep.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/platform-3kKDU7wMKuveeMRb2BAXHaUUFSVjwPSKKN7Q97VyXt7w.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/ui-6TR19D16FSiRaVJ1A2tVsutNw2Ja4UJiHm2MCL5rheHF.tar.zst" }
 
 import linalg.Vec3
 import pf.Vocabulary exposing [Command, Config, Manifest, Rgb]
-import pf.Button
+import pf.GamepadButton
 import pf.Draw
 import pf.Input
 import pf.Key
@@ -137,12 +137,12 @@ Controls : { forward : Bool, jump : Bool, left : Bool, right : Bool, play_again 
 # The keys and every connected pad drive the one ball.
 read_controls : Vocabulary.Input -> Controls
 read_controls = |input| {
-	forward: Key.held(input, Up) or Button.held_any(input, DpadUp) or input.gamepads.any(|pad| pad.left_stick.y > stick_forward),
-	jump: Key.pressed(input, Space) or Button.pressed_any(input, South),
-	left: Key.pressed(input, Left) or Button.pressed_any(input, DpadLeft),
-	right: Key.pressed(input, Right) or Button.pressed_any(input, DpadRight),
-	play_again: Key.pressed(input, Enter) or Button.pressed_any(input, South),
-	quit: Key.pressed(input, Escape) or Button.pressed_any(input, Start),
+	forward: Key.held(input, Up) or GamepadButton.held_any(input, DpadUp) or input.gamepads.any(|pad| pad.left_stick.y > stick_forward),
+	jump: Key.pressed(input, Space) or GamepadButton.pressed_any(input, South),
+	left: Key.pressed(input, Left) or GamepadButton.pressed_any(input, DpadLeft),
+	right: Key.pressed(input, Right) or GamepadButton.pressed_any(input, DpadRight),
+	play_again: Key.pressed(input, Enter) or GamepadButton.pressed_any(input, South),
+	quit: Key.pressed(input, Escape) or GamepadButton.pressed_any(input, Start),
 }
 
 # The stick must pass half its travel, so a light touch does not roll the ball.
@@ -255,7 +255,7 @@ pickup_draw = |meshes, pickup| {
 }
 
 manifest : List((Str, U32)) -> Manifest
-manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, clips: [] })
+manifest = |entries| entries.map(|(name, id)| { name, id, duration: 0.0, size: { w: 0, h: 0 }, clips: [] })
 
 # The Model after init and both of its loads, as the first view sees it.
 started : Model
@@ -338,11 +338,11 @@ expect step(started, idle, QueryResults.empty, 0.1).commands == []
 with_pads : List(Vocabulary.Gamepad) -> Vocabulary.Input
 with_pads = |pads| { ..Input.empty, gamepads: pads }
 
-pad_holding : Button -> Vocabulary.Gamepad
-pad_holding = |button| { ..Input.idle_gamepad, held: [Button.code(button)] }
+pad_holding : GamepadButton -> Vocabulary.Gamepad
+pad_holding = |button| { ..Input.idle_gamepad, held: [GamepadButton.code(button)] }
 
-pad_pressing : Button -> Vocabulary.Gamepad
-pad_pressing = |button| { ..Input.idle_gamepad, pressed: [Button.code(button)] }
+pad_pressing : GamepadButton -> Vocabulary.Gamepad
+pad_pressing = |button| { ..Input.idle_gamepad, pressed: [GamepadButton.code(button)] }
 
 stick_at : F32 -> Vocabulary.Gamepad
 stick_at = |y| { ..Input.idle_gamepad, left_stick: { x: 0.0, y } }
@@ -515,7 +515,7 @@ expect {
 # South with the pad's forward held jumps the gap too.
 expect {
 	before_gap = at_pose(column, { ..column.level.start, cell: { x: 0, y: 1, z: 4 } })
-	jump_forward = { ..stick_at(1.0), pressed: [Button.code(South)] }
+	jump_forward = { ..stick_at(1.0), pressed: [GamepadButton.code(South)] }
 	jumped = step(before_gap, with_pads([jump_forward]), QueryResults.empty, 0.1).model
 	jumped.ball.pose.cell == { x: 0, y: 1, z: 2 } and jumped.ball.motion == Jumping({ from: before_gap.ball.pose, offset: 0.0, t: 0.1 / 0.54 })
 }

@@ -22,7 +22,7 @@ Hud := [].{
 play_again : Rules.Model -> List(Element)
 play_again = |model|
 	if model.phase == Won {
-		[Box({ ..Ui.panel(CenterCenter, { x: 0.0, y: -summary_drop }), pad: Ui.pad_all(16.0) }, [Text(Ui.label("Press Enter to play again"))])]
+		[Panel({ ..Ui.panel(CenterCenter, { x: 0.0, y: -summary_drop }), pad: Ui.pad_all(16.0) }, [Text(Ui.label("Press Enter to play again"))])]
 	} else {
 		[]
 	}
@@ -34,17 +34,17 @@ end_panels = |model, ending| {
 	counted = Ending.counted(ending)
 	before = model.score.total - ending.banked
 	shown = Ending.banner(ending)
-	banner = Box(
+	banner = Panel(
 		{ ..top_centre, pad: Ui.pad_all(16.0), background: { r: 0.0, g: 0.0, b: 0.0, a: 0.5 * shown } },
 		[Text({ ..Ui.label("WELL DONE"), size: 56.0, color: { r: 1.0, g: 0.85, b: 0.2, a: shown } })],
 	)
-	scores = Box({ ..panel, direction: Col, gap: 4.0 }, [Text(Ui.label("Level ${counted.to_str()}")), Text(Ui.label("Score ${(before + counted).to_str()}"))])
+	scores = Panel({ ..panel, direction: Col, gap: 4.0 }, [Text(Ui.label("Level ${counted.to_str()}")), Text(Ui.label("Score ${(before + counted).to_str()}"))])
 	prompt = if Ending.finished(ending) {
 		[Text(Ui.label("Press Space"))]
 	} else {
 		[]
 	}
-	summary = Box(
+	summary = Panel(
 		{ ..Ui.float_at(CenterCenter, { x: 0.0, y: summary_drop }), direction: Col, gap: 12.0, child_align: { x: Center, y: Center } },
 		[scores].concat(prompt),
 	)
@@ -56,22 +56,22 @@ summary_drop : F32
 summary_drop = 120.0
 
 # As in the original, the WELL DONE banner and the Time panel sit at the top centre.
-top_centre : Ui.BoxConfig
+top_centre : Ui.PanelConfig
 top_centre = Ui.panel(CenterTop, { x: 0.0, y: 16.0 })
 
 time : Rules.Model -> Element
 time = |model| {
 	shown_seconds = Clock.panel_seconds({ steps_left: model.clock, start_seconds: model.level.time })
 	shade = Clock.panel_shade({ seconds: shown_seconds })
-	Box(top_centre, [Text({ ..Ui.label("Time ${shown_seconds.to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])
+	Panel(top_centre, [Text({ ..Ui.label("Time ${shown_seconds.to_str()}"), color: { r: shade, g: shade, b: shade, a: 1.0 } })])
 }
 
 # The original's screen is 320 pixels wide. It draws the keys at x 16 and the
 # scores at x 100, so the keys take the first 30% of the row.
 bottom_row : Rules.Model -> Element
-bottom_row = |model| Box(
+bottom_row = |model| Panel(
 	{ ..Ui.float_at(LeftBottom, { x: 0.0, y: 0.0 }), width: Grow({ min: 0.0, max: 0.0 }), pad: Ui.pad_all(16.0), gap: 16.0 },
-	[Box({ ..Ui.default_box, width: Percent(keys_share) }, [keys(model)]), scores(model)],
+	[Panel({ ..Ui.default_panel, width: Percent(keys_share) }, [keys(model)]), scores(model)],
 )
 
 keys_share : F32
@@ -81,12 +81,12 @@ keys : Rules.Model -> Element
 keys = |model| {
 	total = Level.keys(model.level)
 	collected = total - model.keys_left
-	Box(panel, [Text(Ui.label("Keys ${collected.to_str()} / ${total.to_str()}"))])
+	Panel(panel, [Text(Ui.label("Keys ${collected.to_str()} / ${total.to_str()}"))])
 }
 
 # As in the original, the level score sits over the total.
 scores : Rules.Model -> Element
-scores = |model| Box(
+scores = |model| Panel(
 	{ ..panel, direction: Col, gap: 4.0 },
 	[Text(Ui.label("Level ${model.score.level.to_str()}")), Text(Ui.label("Score ${model.score.total.to_str()}"))],
 )
@@ -94,13 +94,13 @@ scores = |model| Box(
 # The original draws its five fruit icons at the bottom right. The corner
 # keeps the bottom row's 16 pixels from the window edge.
 fruit_corner : Rules.Model -> Element
-fruit_corner = |model| Box(
+fruit_corner = |model| Panel(
 	{ ..Ui.float_at(RightBottom, { x: 0.0, y: 0.0 }), pad: Ui.pad_all(16.0) },
-	[Box(panel, [Text(Ui.label("Fruit ${Fruit.count(model.fruits).to_str()} / ${Fruit.kinds.len().to_str()}"))])],
+	[Panel(panel, [Text(Ui.label("Fruit ${Fruit.count(model.fruits).to_str()} / ${Fruit.kinds.len().to_str()}"))])],
 )
 
 # The bottom row places each panel, so a panel does not float.
-panel : Ui.BoxConfig
+panel : Ui.PanelConfig
 panel = { ..Ui.panel(LeftTop, { x: 0.0, y: 0.0 }), floating: NoFloat }
 
 # The ball stands on level 1's key, then collects it.
@@ -112,7 +112,7 @@ one_key = {
 
 texts : Element -> List(Str)
 texts = |element| match element {
-	Box(_, children) => children.map(texts).join()
+	Panel(_, children) => children.map(texts).join()
 	Text(text) => [text.str]
 }
 
@@ -126,8 +126,8 @@ root_with = |model, prefix| match Hud.ui(model).keep_if(|root| texts(root).any(|
 # The keys panel and the scores panel share one row along the bottom.
 expect
 	match root_with(Rules.start(View.primitive_meshes, 1), "Keys") {
-		Ok(Box(row, [Box(_, [keys_panel]), scores_panel])) =>
-			row.floating == Float({ attach: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and texts(keys_panel) == ["Keys 0 / 1"] and texts(scores_panel) == ["Level 0", "Score 0"]
+		Ok(Panel(row, [Panel(_, [keys_panel]), scores_panel])) =>
+			row.floating == Float({ to: Window, attach: LeftBottom, on: LeftBottom, offset: { x: 0.0, y: 0.0 } }) and texts(keys_panel) == ["Keys 0 / 1"] and texts(scores_panel) == ["Level 0", "Score 0"]
 		_ => Bool.False
 	}
 
@@ -135,7 +135,7 @@ expect root_with({ ..one_key, score: { ..one_key.score, total: 2500 } }, "Keys")
 
 time_panel : Rules.Model -> Try({ str : Str, shade : F32 }, [NoPanel])
 time_panel = |model| match root_with(model, "Time ") {
-	Ok(Box(time_box, [Text(text)])) =>
+	Ok(Panel(time_box, [Text(text)])) =>
 		if time_box.floating == top_centre.floating and text.color.r == text.color.g and text.color.g == text.color.b and text.color.a == 1.0 {
 			Ok({ str: text.str, shade: text.color.r })
 		} else {
@@ -161,8 +161,8 @@ expect time_panel(level_one_at(1)) == Ok({ str: "Time 1", shade: Clock.panel_sha
 
 fruit_text : Rules.Model -> Str
 fruit_text = |model| match root_with(model, "Fruit") {
-	Ok(Box(corner, [Box(_, [Text(text)])])) =>
-		if corner.floating == Float({ attach: RightBottom, offset: { x: 0.0, y: 0.0 } }) {
+	Ok(Panel(corner, [Panel(_, [Text(text)])])) =>
+		if corner.floating == Float({ to: Window, attach: RightBottom, on: RightBottom, offset: { x: 0.0, y: 0.0 } }) {
 			text.str
 		} else {
 			""
@@ -176,7 +176,7 @@ expect fruit_text({ ..one_key, fruits: { now: [Apple], saved: [] } }) == "Fruit 
 
 end_texts : Rules.Model -> List(Str)
 end_texts = |model| match Hud.ui(model) {
-	[Box(_, [Text(banner)]), Box(_, [Box(_, [Text(level), Text(total)]), .. as rest])] =>
+	[Panel(_, [Text(banner)]), Panel(_, [Panel(_, [Text(level), Text(total)]), .. as rest])] =>
 		[banner.str, level.str, total.str].concat(
 			rest.map(
 				|element| match element {
@@ -202,7 +202,7 @@ expect end_texts(ended(0.0)) == ["WELL DONE", "Level 0", "Score 2000"]
 expect {
 	half = ended(0.5)
 	alpha = match Hud.ui(half) {
-		[Box(_, [Text(banner)]), _] => banner.color.a
+		[Panel(_, [Text(banner)]), _] => banner.color.a
 		_ => -1.0
 	}
 	end_texts(half) == ["WELL DONE", "Level 2500", "Score 4500"] and alpha > 0.29 and alpha < 0.3
@@ -216,8 +216,8 @@ expect end_texts({ ..ended(2.0), phase: Cleared({ ..Ending.start(3000), seconds:
 expect {
 	won = { ..one_key, phase: Won }
 	match Hud.ui(won) {
-		[.. as hud, Box(prompt, [Text(text)])] =>
-			hud == Hud.ui({ ..won, phase: Playing }) and prompt.floating == Float({ attach: CenterCenter, offset: { x: 0.0, y: -summary_drop } }) and text.str == "Press Enter to play again"
+		[.. as hud, Panel(prompt, [Text(text)])] =>
+			hud == Hud.ui({ ..won, phase: Playing }) and prompt.floating == Float({ to: Window, attach: CenterCenter, on: CenterCenter, offset: { x: 0.0, y: -summary_drop } }) and text.str == "Press Enter to play again"
 		_ => Bool.False
 	}
 }
