@@ -35,7 +35,7 @@ description: Record an MP4 of Kula played over the rocco Bridge. Use when asked 
 }
 ```
 
-- `held` and `tap` are `pf.Key` names. `pad` holds `held` and `tap` lists of Button names for a pad in slot 0. The pad needs rocco v0.5.0 or later in the `main.roc` header.
+- `held` and `tap` are `pf.Key` names. `pad` holds `held` and `tap` lists of `pf.GamepadButton` names for a pad in slot 0. The pad needs rocco v0.5.0 or later in the `main.roc` header.
 - `press` is the steps with the input on (default 1). `settle` is the idle steps after (default 47, a bit more than the slowest roll).
 - A tap counts once, at the first step of the move.
 - `warmup` idle steps cover the Theme load and the `Starting` wait. `tail` idle steps run after the last move.

@@ -22,7 +22,7 @@ Sounds := [].{
 
 # Each asset resolves to its own field.
 expect {
-	sounds = Sounds.resolve(Sounds.assets.map_with_index(|name, i| { name, id: 1 + i.to_u32_wrap(), duration: 0.0, clips: [] }))
+	sounds = Sounds.resolve(Sounds.assets.map_with_index(|name, i| { name, id: 1 + i.to_u32_wrap(), duration: 0.0, size: { w: 0, h: 0 }, clips: [] }))
 	[sounds.bounce, sounds.chime, sounds.tick, sounds.jingle, sounds.key, sounds.last_key] == [1, 2, 3, 4, 5, 6]
 }
 
