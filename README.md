@@ -206,9 +206,10 @@ back and the exit closes. The fall also costs points. See Score.
 - In `Won`, Enter or the pad's South starts a fresh game on level 1. Every
   other input except Escape does nothing. See Level end.
 - A closed exit does nothing. The ball can roll over it.
-- A panel at the bottom left shows the keys collected out of the level's
-  total, such as `Keys 1 / 2`. It hides with the rest of the HUD in `Ending`
-  and `Cleared`.
+- A panel at the bottom left shows one key icon for each key of the level.
+  An icon lights when its key is collected, in order. Until the icons load,
+  the panel shows the count as text, such as `Keys 1 / 2`. It hides with the
+  rest of the HUD in `Ending` and `Cleared`.
 
 ## Level end
 
@@ -257,8 +258,9 @@ and strawberry. See `SPEC.md`, Items.
   to the level score and plays a jingle.
 - The exit keeps the fruit collected. A fall loses the fruit collected
   since the last exit.
-- A panel at the bottom right shows the fruit collected out of five, such
-  as `Fruit 1 / 5`.
+- A panel at the bottom right shows five fruit icons, one for each fruit
+  in the order above. An icon lights when its fruit is collected. Until the
+  icons load, the panel shows the count as text, such as `Fruit 1 / 5`.
 - Kula has no bonus level, so five fruits do nothing more.
 
 ## Score
@@ -512,6 +514,25 @@ and commit its output:
 
 ```sh
 python3 assets/source/make_sounds.py
+```
+
+## HUD icons
+
+The HUD shows each icon at 32 × 32 with the Linear filter. A dim tint marks
+a key or a fruit not yet collected. The kula pack loads them as `image/key`
+and `image/fruit` (`Icons.roc`).
+
+| File | What it is |
+|---|---|
+| `assets/images/key.png` | A gold key with a diamond bow, 64 × 64 RGBA |
+| `assets/images/fruit.png` | A red apple with a stem and a leaf, 64 × 64 RGBA |
+
+`assets/source/make_icons.py` draws them with the Python standard library.
+They are a first pass, not copied from the original. Run it from this
+directory and commit its output:
+
+```sh
+python3 assets/source/make_icons.py
 ```
 
 ## Credits
