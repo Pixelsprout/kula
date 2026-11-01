@@ -13,7 +13,7 @@ copies.
 ## Run
 
 Kula needs only Roc. Install the Roc nightly `nightly-2026-10-11-7d256b9`.
-The v0.7.0-rc.1 release built the bundles with it. Then, from this directory:
+The v0.7.0 release built the bundles with it. Then, from this directory:
 
 ```sh
 roc main.roc
@@ -22,14 +22,14 @@ roc test main.roc
 
 Roc downloads the platform and the packages from the bundle URLs in the
 `main.roc` header. They come from the
-[rocco v0.7.0-rc.1 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.7.0-rc.1):
+[rocco v0.7.0 release](https://github.com/Pixelsprout/rocco-engine/releases/tag/v0.7.0):
 
 | Bundle | URL |
 |---|---|
-| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0-rc.1/platform-AKL22uR1D5f8JUBXfAoUVAtTYonF5LrssYtG3KRPjLdw.tar.zst |
-| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0-rc.1/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst |
-| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0-rc.1/mesh-ASrdD2SvXz4UPX3tBfs8RoNo2p7R1FseoZH4iXmWyjep.tar.zst |
-| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0-rc.1/ui-6TR19D16FSiRaVJ1A2tVsutNw2Ja4UJiHm2MCL5rheHF.tar.zst |
+| platform | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/platform-3kKDU7wMKuveeMRb2BAXHaUUFSVjwPSKKN7Q97VyXt7w.tar.zst |
+| linalg | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst |
+| mesh | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/mesh-ASrdD2SvXz4UPX3tBfs8RoNo2p7R1FseoZH4iXmWyjep.tar.zst |
+| ui | https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/ui-6TR19D16FSiRaVJ1A2tVsutNw2Ja4UJiHm2MCL5rheHF.tar.zst |
 
 To move to a new rocco release, copy the URLs and the nightly from its
 release notes into the header and this table.
