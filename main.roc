@@ -1,4 +1,4 @@
-app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/mesh-ASrdD2SvXz4UPX3tBfs8RoNo2p7R1FseoZH4iXmWyjep.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/platform-3kKDU7wMKuveeMRb2BAXHaUUFSVjwPSKKN7Q97VyXt7w.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.7.0/ui-6TR19D16FSiRaVJ1A2tVsutNw2Ja4UJiHm2MCL5rheHF.tar.zst" }
+app [init, launch, loaded, step, view] { linalg: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.10.0/linalg-4N62Pw77Sky6ba8RiBfvULjHuAQeQiqHbUor7qSeor7F.tar.zst", mesh: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.10.0/mesh-CdWwEzqqVE9DthN144ub9ri6e33gPWv19K5FvNbpX5Na.tar.zst", pf: platform "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.10.0/platform-6EpFLWeepZohGJzcaQELqfi5pXjyqXGXrqqFTpxQwXhm.tar.zst", roc: "nightly-2026-10-11-7d256b9", ui: "https://github.com/Pixelsprout/rocco-engine/releases/download/v0.10.0/ui-6TR19D16FSiRaVJ1A2tVsutNw2Ja4UJiHm2MCL5rheHF.tar.zst" }
 
 import linalg.Vec3
 import pf.Vocabulary exposing [Command, Config, Manifest, Rgb]
@@ -225,7 +225,7 @@ view = |model| {
 	}
 	lights = theme.lights.concat(Flash.lights(model.flashes, theme.lights)).map(|light| Light(light))
 	draws = blocks.concat(pickups).concat(ball).map(|draw| Draw(draw))
-	{ ..Scene.empty, camera, nodes: lights.concat(draws), sky: model.meshes.sky, ui: Hud.ui(model) }
+	{ ..Scene.empty, camera, nodes: lights.concat(draws), environment: { ..Scene.empty.environment, sky: model.meshes.sky }, ui: Hud.ui(model) }
 }
 
 # Face draw ids count up from 1, so the pickup ids start well past any level's faces.
@@ -317,7 +317,7 @@ expect init({ seed: 0, args: [], assets: [] }).model.meshes == { sphere: 2, face
 expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { ..Sounds.none, bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
 expect init({ seed: 0, args: [], assets: [] }).model.icons == Icons.none and started.icons == { key: key_icon_id, fruit: fruit_icon_id }
 expect started.meshes == { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
-expect view(started).sky == 1
+expect view(started).environment.sky == 1
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
 
