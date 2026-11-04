@@ -114,10 +114,10 @@ def arctic_texel(edge, dx, dy, noise):
 
 
 # Sandstone with a bright outer bevel, a carved groove and faint layers.
-# Kula's own design. The base, sRGB (212, 130, 62), is more saturated than the
-# Hiro tile's neutral colour (210, 138, 74), because the tone map and the
-# highlight pale it: under the hiro lights a top face shows near the tile colour.
-HIRO_SAND = (0.658, 0.223, 0.048)
+# Kula's own design. The base, sRGB (193, 137, 78), is near the Hiro tile's
+# neutral colour (210, 138, 74). Under the hiro lights and the Neutral tone map a
+# top face shows about (214, 146, 77).
+HIRO_SAND = (0.531, 0.249, 0.076)
 
 
 def hiro_texel(edge, dx, dy, noise):
