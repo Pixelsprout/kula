@@ -1,12 +1,13 @@
 import linalg.Vec3
 import pf.Vocabulary exposing [Rgb]
+import pf.Environment
 import pf.Light
 import Level
 
 # The look of one level. Each Theme is a pack of its face mesh and its sky, so
 # the next level's Theme loads while the current one still draws.
 Theme := [].{
-	Theme : { pack : Str, face : Str, sky : Str, assets : List(Str), sun : Vec3.Vec3, lights : List(Vocabulary.Light) }
+	Theme : { pack : Str, face : Str, sky : Str, assets : List(Str), sun : Vec3.Vec3, lights : List(Vocabulary.Light), horizon : Rgb }
 
 	# Levels count from 1. A number past the last level gets the last Theme.
 	of_level : U64 -> Theme.Theme
@@ -14,6 +15,10 @@ Theme := [].{
 
 	count : U64
 	count = by_level.len()
+
+	# sky is the id that the Theme's sky loaded as.
+	environment : Theme.Theme, U32 -> Vocabulary.Environment
+	environment = |t, sky| { ..Environment.default, sky, fog: { color: t.horizon, start: fog_start, end: fog_end, amount: fog_amount } }
 }
 
 # The original loads one look for each world, so all the levels of a world share it.
@@ -36,23 +41,26 @@ hiro = theme(
 		sun_colour: block_colour(1.7, { r: 140, g: 128, b: 102 }),
 		fill: block_colour(0.2, { r: 76, g: 102, b: 179 }),
 		ambient: block_colour(0.78, { r: 128, g: 128, b: 140 }),
+		horizon: { r: 0.49, g: 0.37, b: 0.28 },
 	},
 )
 
 haze : Theme.Theme
-haze = theme("haze", { sun: { x: -2.0 / 7.0, y: -6.0 / 7.0, z: -3.0 / 7.0 }, sun_colour: grey(1.6), fill: grey(0.3), ambient: { r: 0.14, g: 0.15, b: 0.17 } })
+haze = theme("haze", { sun: { x: -2.0 / 7.0, y: -6.0 / 7.0, z: -3.0 / 7.0 }, sun_colour: grey(1.6), fill: grey(0.3), ambient: { r: 0.14, g: 0.15, b: 0.17 }, horizon: { r: 0.41, g: 0.41, b: 0.45 } })
 
 inca : Theme.Theme
-inca = theme("inca", { sun: { x: 3.0 / 7.0, y: -6.0 / 7.0, z: -2.0 / 7.0 }, sun_colour: { r: 1.9, g: 1.55, b: 1.1 }, fill: grey(0.3), ambient: { r: 0.18, g: 0.14, b: 0.1 } })
+inca = theme("inca", { sun: { x: 3.0 / 7.0, y: -6.0 / 7.0, z: -2.0 / 7.0 }, sun_colour: { r: 1.9, g: 1.55, b: 1.1 }, fill: grey(0.3), ambient: { r: 0.18, g: 0.14, b: 0.1 }, horizon: { r: 0.46, g: 0.28, b: 0.14 } })
 
 arctic : Theme.Theme
-arctic = theme("arctic", { sun: { x: -3.0 / 7.0, y: -6.0 / 7.0, z: 2.0 / 7.0 }, sun_colour: { r: 1.0, g: 1.1, b: 1.3 }, fill: grey(0.3), ambient: { r: 0.13, g: 0.16, b: 0.2 } })
+arctic = theme("arctic", { sun: { x: -3.0 / 7.0, y: -6.0 / 7.0, z: 2.0 / 7.0 }, sun_colour: { r: 1.0, g: 1.1, b: 1.3 }, fill: grey(0.3), ambient: { r: 0.13, g: 0.16, b: 0.2 }, horizon: { r: 0.43, g: 0.56, b: 0.65 } })
 
 # No two axes of a sun's dir share a size, so each face direction gets its own shade.
 # The BRDF divides diffuse light by pi, so a sun of 1.6 lights a white surface facing it to 1.6.
 # The fill lights the faces turned away from the sun. The ambient takes the sky's hue.
 # make_skies.py paints the sun where this light comes from.
-theme : Str, { sun : Vec3.Vec3, sun_colour : Rgb, fill : Rgb, ambient : Rgb } -> Theme.Theme
+# The sky does not fog, so the fog takes the horizon colour: the linear mean of
+# the sky's side faces 2 degrees either side of the horizon.
+theme : Str, { sun : Vec3.Vec3, sun_colour : Rgb, fill : Rgb, ambient : Rgb, horizon : Rgb } -> Theme.Theme
 theme = |pack, light| {
 	face = "${pack}_face"
 	sky = "sky/${pack}"
@@ -67,8 +75,19 @@ theme = |pack, light| {
 			Light.sun(light.sun, times_pi(light.sun_colour)),
 			Light.directional(Vec3.neg(light.sun), times_pi(light.fill)),
 		],
+		horizon: light.horizon,
 	}
 }
+
+# The fog distances are in cells from the eye.
+fog_start : F32
+fog_start = 4.0
+
+fog_end : F32
+fog_end = 24.0
+
+fog_amount : F32
+fog_amount = 0.8
 
 grey : F32 -> Rgb
 grey = |v| { r: v, g: v, b: v }
@@ -118,3 +137,8 @@ expect themes.all(
 expect themes.all(|a| themes.keep_if(|b| b.sun == a.sun).len() == 1)
 expect themes.all(|t| t.assets == [t.face, t.sky])
 expect themes.map(|t| t.assets) == [["hiro_face", "sky/hiro"], ["haze_face", "sky/haze"], ["inca_face", "sky/inca"], ["arctic_face", "sky/arctic"]]
+expect {
+	env = Theme.environment(hiro, 3)
+	env.sky == 3 and env.fog.color == hiro.horizon and env.fog.amount > 0.0 and env.fog.start < env.fog.end and env.tone_map == Environment.default.tone_map and env.bloom == Environment.default.bloom
+}
+expect themes.all(|a| themes.keep_if(|b| b.horizon == a.horizon).len() == 1)

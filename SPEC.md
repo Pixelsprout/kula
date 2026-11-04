@@ -279,7 +279,7 @@ A table in Kula code maps each level to its Theme.
 | Block shading | No real-time lighting. Each face direction picks a fixed brightness, a CLUT level of its tile (`sideBrightness`, `level_init.c:1059`). See Hiro block colours | Code | A Theme sun, a dim fill opposite it and an ambient, all fixed in the world. Each face direction gets its own shade |
 | Ball shadow | A shadow sprite (`DrawShadowSprites`, `render1.c`) | Code | A shadow map from the Theme sun. The shadow falls away from the sun, not always below the ball |
 | Sun | A sun for each world with a lens flare (`lensflare.c`) | Code | The sun is painted in the sky, in line with the Theme sun. No lens flare |
-| Distance fade | Distant faces fade toward the Theme block colour (`SetFarColor`, `render1.c`) | Inferred | No fog yet |
+| Distance fade | Distant faces fade toward `farColor` (`SetFarColor`, `render1.c:140`). `CalculateBlockLighting` mixes it each frame from the Theme block colours by the camera's view direction (`render1.c:174-235`). The decompilation does not show where it sets the fade distances | Code (colour), Not found (distances) | Linear fog from 4 to 24 cells, up to 0.8 of the fog colour (`Theme.environment`). A change from the original: the fog colour is fixed for each Theme and is the linear mean of its sky 2° either side of the horizon. The engine does not fog the sky, so a fog colour that changes with the view would show far faces against a sky of another colour (Inferred). The distances are a choice, not the original's |
 | Ball shine | A specular sprite (`DrawPlayerSpecularSprites`, `render3.c`) | Code | A specular term from the ball's glTF material |
 | Pickup flash | Each item pickup starts a light effect on the item's face and a particle that sets the light's colour each frame. The light ends with the particle (`AddLightEffect` in `level_update3.c:164-315`, `particles.c:157-160`) | Code | Each pickup starts a Point light that fades (`Flash.roc`). No particles |
 | Flash colour | Each frame sums the particle's two sprites, colour × `PARTICLE_COLOR_DATA` >> 9 (`particles.c:246-271`). Key and coin use one table (type 6 and 2, `PARTICLE_TYPE_2_6_7`, PAL data at `data_particles.c:401-432`): black, then (25, 25, 45) at frame 4, held to frame 9, grey (19, 19, 19) at frame 23, black at frame 33. A fruit (type 4, `:185-217`) peaks at (41, 30, 41) and is black by frame 24 | Code (data), Inferred (sums) | Key and coin: the same five points, linear between them, 0.02 s a frame. Peak from 0.08 s to 0.18 s, gone at 0.66 s. Fruit: points at frames 0, 4, 8, 11, 13, 16, 20 and 24, within 1 PS1 unit of each frame of the table. Peak from 0.16 s to 0.22 s, gone at 0.48 s |
@@ -446,7 +446,6 @@ total and a `Press Enter to play again` prompt.
 - The "hall of mirrors": in skybox themes the original does not clear the
   screen each frame (Code, `src/disp.c`). The engine clears every frame.
 - The lens flare and the motion blur on fast turns.
-- Fog.
 - The long jump, the Bouncy pill, bounce pads and the boost.
 - The pad rumble on a hit or a hard landing, and the screen shake of a
   landing at top fall speed (`player_movement.c:694, 740, 782-785`).
