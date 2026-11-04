@@ -23,7 +23,7 @@ Theme := [].{
 			Fog => fog_amount
 			NoFog => 0.0
 		}
-		{ ..Environment.default, sky, fog: { color: t.horizon, start: fog_start, end: fog_end, amount } }
+		{ ..Environment.default, sky, tone_map: Neutral, fog: { color: t.horizon, start: fog_start, end: fog_end, amount } }
 	}
 }
 
@@ -38,15 +38,15 @@ themes = [hiro, haze, inca, arctic]
 
 # HIRO.TGI draws the original's Y+ faces (Kula's +z) light and its Y- faces dark, so the sun comes from +z.
 # The light colours reuse its block colours, which the original only fades far faces toward.
-# The scales bring the faces near the original's tile colours.
+# With the face texture, the scales give the face colours in SPEC.md, Hiro block colours, under Neutral.
 hiro : Theme.Theme
 hiro = theme(
 	"hiro",
 	{
 		sun: { x: -2.0 / 7.0, y: -3.0 / 7.0, z: -6.0 / 7.0 },
-		sun_colour: block_colour(1.7, { r: 140, g: 128, b: 102 }),
-		fill: block_colour(0.2, { r: 76, g: 102, b: 179 }),
-		ambient: block_colour(0.78, { r: 128, g: 128, b: 140 }),
+		sun_colour: block_colour(1.32, { r: 140, g: 128, b: 102 }),
+		fill: block_colour(0.15, { r: 76, g: 102, b: 179 }),
+		ambient: block_colour(0.67, { r: 128, g: 128, b: 140 }),
 		horizon: { r: 0.49, g: 0.37, b: 0.28 },
 	},
 )
@@ -145,7 +145,7 @@ expect themes.all(|t| t.assets == [t.face, t.sky])
 expect themes.map(|t| t.assets) == [["hiro_face", "sky/hiro"], ["haze_face", "sky/haze"], ["inca_face", "sky/inca"], ["arctic_face", "sky/arctic"]]
 expect {
 	env = Theme.environment(hiro, 3, Fog)
-	env.sky == 3 and env.fog.color == hiro.horizon and env.fog.amount > 0.0 and env.fog.start < env.fog.end and env.tone_map == Environment.default.tone_map and env.bloom == Environment.default.bloom
+	env.sky == 3 and env.fog.color == hiro.horizon and env.fog.amount > 0.0 and env.fog.start < env.fog.end and env.tone_map == Neutral and env.bloom == Environment.default.bloom
 }
 expect Theme.environment(hiro, 3, NoFog) == { ..Theme.environment(hiro, 3, Fog), fog: { ..Theme.environment(hiro, 3, Fog).fog, amount: 0.0 } }
 expect themes.all(|a| themes.keep_if(|b| b.horizon == a.horizon).len() == 1)
