@@ -325,9 +325,11 @@ Each Theme is also a pack name. The pack of Theme `<theme>` holds
 carries the Theme's colour. The sun is painted in the sky where the Theme's
 sun light comes from.
 
-Far faces fade into fog. The fog starts 4 cells from the camera and reaches
-0.8 of its colour at 24 cells. The fog colour of each Theme is the colour of
-its sky at the horizon, because the engine does not fog the sky.
+Far faces fade into fog. The fog starts 2 cells from the camera and reaches
+0.8 of its colour at 12 cells. The fog colour of each Theme is the colour of
+its sky at the horizon, because the engine does not fog the sky. The level
+end view has no fog: its camera is far enough out that fog would make the
+whole level pale.
 
 1. `init` sends Load for the `kula` pack and Load for the level 1 Theme.
    The `kula` pack holds `ball`, `coin`, `apple`, `watermelon`, `pumpkin`,

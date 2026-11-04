@@ -198,6 +198,11 @@ view = |model| {
 		Ok(sequence) => View.orbit(model.level.blocks, sequence.seconds)
 		Err(NotEnded) => View.camera(model.ball)
 	}
+	# The orbit camera sits 10 to 20 cells out, where fog would wash out the whole level.
+	fog = match ending {
+		Ok(_) => NoFog
+		Err(NotEnded) => Fog
+	}
 	# Ids come before the near-plane filter, so a face keeps its id while others drop out.
 	blocks = View.faces(model.level.blocks)
 		.map_with_index(|face, i| { face, id: 1 + i.to_u64() })
@@ -225,7 +230,7 @@ view = |model| {
 	}
 	lights = theme.lights.concat(Flash.lights(model.flashes, theme.lights)).map(|light| Light(light))
 	draws = blocks.concat(pickups).concat(ball).map(|draw| Draw(draw))
-	{ ..Scene.empty, camera, nodes: lights.concat(draws), environment: Theme.environment(theme, model.meshes.sky), ui: Hud.ui(model) }
+	{ ..Scene.empty, camera, nodes: lights.concat(draws), environment: Theme.environment(theme, model.meshes.sky, fog), ui: Hud.ui(model) }
 }
 
 # Face draw ids count up from 1, so the pickup ids start well past any level's faces.
@@ -317,7 +322,8 @@ expect init({ seed: 0, args: [], assets: [] }).model.meshes == { sphere: 2, face
 expect init({ seed: 0, args: [], assets: [] }).model.sounds == Sounds.none and started.sounds == { ..Sounds.none, bounce: bounce_id, chime: chime_id, tick: tick_id, jingle: jingle_id, key: key_sound_id, last_key: last_key_id }
 expect init({ seed: 0, args: [], assets: [] }).model.icons == Icons.none and started.icons == { key: key_icon_id, fruit: fruit_icon_id }
 expect started.meshes == { sphere: 2, face: 5, ball: 4, coin: 6, apple: 7, watermelon: 8, pumpkin: 9, key: 10, sky: 1 }
-expect view(started).environment == Theme.environment(Theme.of_level(1), 1)
+expect view(started).environment == Theme.environment(Theme.of_level(1), 1, Fog)
+expect view({ ..started, phase: Ending(Ending.start(0)) }).environment == Theme.environment(Theme.of_level(1), 1, NoFog)
 expect started.ball == Ball.start(started.level.start)
 expect started.level_number == 1 and started.phase == Playing
 
