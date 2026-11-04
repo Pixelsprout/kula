@@ -17,8 +17,14 @@ Theme := [].{
 	count = by_level.len()
 
 	# sky is the id that the Theme's sky loaded as.
-	environment : Theme.Theme, U32 -> Vocabulary.Environment
-	environment = |t, sky| { ..Environment.default, sky, fog: { color: t.horizon, start: fog_start, end: fog_end, amount: fog_amount } }
+	environment : Theme.Theme, U32, [Fog, NoFog] -> Vocabulary.Environment
+	environment = |t, sky, fog| {
+		amount = match fog {
+			Fog => fog_amount
+			NoFog => 0.0
+		}
+		{ ..Environment.default, sky, fog: { color: t.horizon, start: fog_start, end: fog_end, amount } }
+	}
 }
 
 # The original loads one look for each world, so all the levels of a world share it.
@@ -81,10 +87,10 @@ theme = |pack, light| {
 
 # The fog distances are in cells from the eye.
 fog_start : F32
-fog_start = 4.0
+fog_start = 2.0
 
 fog_end : F32
-fog_end = 24.0
+fog_end = 12.0
 
 fog_amount : F32
 fog_amount = 0.8
@@ -138,7 +144,8 @@ expect themes.all(|a| themes.keep_if(|b| b.sun == a.sun).len() == 1)
 expect themes.all(|t| t.assets == [t.face, t.sky])
 expect themes.map(|t| t.assets) == [["hiro_face", "sky/hiro"], ["haze_face", "sky/haze"], ["inca_face", "sky/inca"], ["arctic_face", "sky/arctic"]]
 expect {
-	env = Theme.environment(hiro, 3)
+	env = Theme.environment(hiro, 3, Fog)
 	env.sky == 3 and env.fog.color == hiro.horizon and env.fog.amount > 0.0 and env.fog.start < env.fog.end and env.tone_map == Environment.default.tone_map and env.bloom == Environment.default.bloom
 }
+expect Theme.environment(hiro, 3, NoFog) == { ..Theme.environment(hiro, 3, Fog), fog: { ..Theme.environment(hiro, 3, Fog).fog, amount: 0.0 } }
 expect themes.all(|a| themes.keep_if(|b| b.horizon == a.horizon).len() == 1)
